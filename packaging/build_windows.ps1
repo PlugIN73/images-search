@@ -33,6 +33,7 @@ Write-Host "== PyInstaller"
   --name $Name `
   --workpath "$Build\work" --specpath $Build --distpath dist `
   --add-data "$((Resolve-Path ui).Path);ui" `
+  --icon "$((Resolve-Path packaging\icon\ikonka.ico).Path)" `
   okno.py
 if ($LASTEXITCODE) { throw "PyInstaller failed" }
 

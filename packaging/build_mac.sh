@@ -30,6 +30,7 @@ echo "== PyInstaller"
   --osx-bundle-identifier "io.github.plugin73.poisk-kartinok" \
   --workpath "$BUILD/work" --specpath "$BUILD" --distpath dist \
   --add-data "$PWD/ui:ui" \
+  --icon "$PWD/packaging/icon/ikonka.icns" \
   okno.py
 
 # Версия в «Об этой программе» / Finder

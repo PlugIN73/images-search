@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2c2c31"/><stop offset="1" stop-color="#121214"/></linearGradient>
+  <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffc98c"/><stop offset="1" stop-color="#fff0dc"/></linearGradient>
+  <linearGradient id="ring" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ffa24a"/><stop offset="1" stop-color="#e8580a"/></linearGradient>
+  <linearGradient id="h" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff9a40"/><stop offset="1" stop-color="#d9520a"/></linearGradient>
+  <radialGradient id="glow" cx="0.45" cy="0.42" r="0.6"><stop offset="0" stop-color="#ff7a1a" stop-opacity=".28"/><stop offset="1" stop-color="#ff7a1a" stop-opacity="0"/></radialGradient>
+  <clipPath id="lens"><circle cx="458" cy="456" r="222"/></clipPath>
+  <filter id="sh" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#000" flood-opacity=".55"/></filter>
+</defs>
+<rect x="100" y="100" width="824" height="824" rx="186" fill="url(#bg)"/>
+<rect x="100" y="100" width="824" height="824" rx="186" fill="url(#glow)"/>
+<rect x="101" y="101" width="822" height="822" rx="185" fill="none" stroke="#ffffff" stroke-opacity=".07" stroke-width="2"/>
+<g filter="url(#sh)">
+  <line x1="640" y1="640" x2="806" y2="806" stroke="url(#h)" stroke-width="96" stroke-linecap="round"/>
+  
+  <g clip-path="url(#lens)">
+    <rect x="200" y="200" width="520" height="520" fill="url(#sky)"/>
+    <circle cx="540" cy="380" r="62" fill="#ff7a1a"/>
+    <path d="M220 680 L380 470 L470 560 L560 480 L720 680 Z" fill="#3a2e26"/>
+    <path d="M220 680 L330 590 L440 650 L560 590 L700 680 Z" fill="#5b463a"/>
+  </g>
+  <circle cx="458" cy="456" r="222" fill="none" stroke="url(#ring)" stroke-width="58"/>
+  <path d="M330 330 A 175 175 0 0 1 430 286" fill="none" stroke="#ffffff" stroke-opacity=".85" stroke-width="22" stroke-linecap="round"/>
+</g>
+</svg>

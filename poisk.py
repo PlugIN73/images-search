@@ -23,7 +23,7 @@ from pathlib import Path
 import requests
 from PIL import Image
 
-ВЕРСИЯ = "1.0.0"
+ВЕРСИЯ = "1.0.1"
 РЕПОЗИТОРИЙ = "PlugIN73/images-search"
 
 # ---------------- Настройки ----------------
