@@ -27,10 +27,11 @@ jobs:
         run: uv run --python 3.11 --with-requirements requirements.txt python -m unittest discover -v tests
       - name: Сборка .app и .dmg
         run: bash packaging/build_mac.sh
-      - uses: actions/upload-artifact@v4
+      # archive: false — артефакт это сам .dmg под своим именем, без обёртки в zip
+      - uses: actions/upload-artifact@v7
         with:
-          name: mac-${{ matrix.runner }}
           path: dist/*.dmg
+          archive: false
           if-no-files-found: error
 
   windows:
@@ -50,10 +51,11 @@ jobs:
       - name: Сборка .exe и .zip
         shell: pwsh
         run: ./packaging/build_windows.ps1
-      - uses: actions/upload-artifact@v4
+      # archive: false — артефакт это сам Poisk-kartinok-…-windows.zip, а не zip в zip
+      - uses: actions/upload-artifact@v7
         with:
-          name: windows
           path: dist/*.zip
+          archive: false
           if-no-files-found: error
 
   release:
@@ -66,10 +68,12 @@ jobs:
         run: |
           code=$(sed -n 's/^ВЕРСИЯ = "\(.*\)"/\1/p' poisk.py)
           [ "v$code" = "$GITHUB_REF_NAME" ] || { echo "В poisk.py версия $code, а тег $GITHUB_REF_NAME"; exit 1; }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: out
           merge-multiple: true
+          # Артефакты уже готовые файлы; без этого Windows-.zip распаковался бы в папку
+          skip-decompress: true
       - name: Релиз
         env:
           GH_TOKEN: ${{ github.token }}
