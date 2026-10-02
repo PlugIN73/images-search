@@ -41,7 +41,8 @@ Copy-Item -Recurse "$Build\ms-playwright" "dist\$Name\_internal\ms-playwright"
 
 Write-Host "== Marking files as downloaded from the internet (like Explorer does when extracting a downloaded zip)"
 # The self-test must pass on a bundle that carries Mark-of-the-Web, as on a real user's PC.
-Get-ChildItem -Recurse -File "dist\$Name" | ForEach-Object {
+# The exe itself stays unmarked: a person confirms it in SmartScreen, CI can't click that dialog.
+Get-ChildItem -Recurse -File "dist\$Name" | Where-Object { $_.Name -ne "$Name.exe" } | ForEach-Object {
   Set-Content -Path $_.FullName -Stream Zone.Identifier -Value "[ZoneTransfer]`r`nZoneId=3"
 }
 
