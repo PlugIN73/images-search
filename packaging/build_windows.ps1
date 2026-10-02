@@ -1,7 +1,7 @@
 ﻿# Build "Poisk-kartinok" for Windows (folder + zip).
 # Run from the project root in PowerShell:  powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
 # Needs Python 3.11 in PATH (or set $env:PYTHON). Chromium is bundled next to the exe
-# (dist\Poisk-kartinok\ms-playwright), nothing gets installed into the system.
+# (dist\Poisk-kartinok\_internal\ms-playwright), nothing gets installed into the system.
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 
@@ -36,7 +36,7 @@ Write-Host "== PyInstaller"
 if ($LASTEXITCODE) { throw "PyInstaller failed" }
 
 Write-Host "== Bundling Chromium"
-Copy-Item -Recurse "$Build\ms-playwright" "dist\$Name\ms-playwright"
+Copy-Item -Recurse "$Build\ms-playwright" "dist\$Name\_internal\ms-playwright"
 
 Write-Host "== Self-test"
 $Report = Join-Path (Resolve-Path $Build) "self-test.txt"
@@ -46,6 +46,16 @@ $p = Start-Process -FilePath "dist\$Name\$Name.exe" -ArgumentList "--self-test",
 Remove-Item Env:POISK_DATA
 if (Test-Path $Report) { Get-Content $Report -Encoding UTF8 }
 if ($p.ExitCode -ne 0) { throw "Self-test failed (exit code $($p.ExitCode))" }
+
+Write-Host "== Data folder check (no POISK_DATA: results must go next to the exe)"
+$Dist = Resolve-Path "dist\$Name"
+$p = Start-Process -FilePath "$Dist\$Name.exe" -ArgumentList "--self-test", "`"$Report`"" -Wait -PassThru
+$Text = Get-Content $Report -Encoding UTF8 -Raw
+if ($Text -notmatch [regex]::Escape("$Dist (") -or -not (Test-Path "$Dist\_internal\данные")) {
+  Write-Host $Text; throw "Data folder is not next to the exe"
+}
+# Remove everything this check created so the zip ships clean
+Remove-Item -Recurse -Force "$Dist\_internal\данные", "$Dist\Результаты" -ErrorAction SilentlyContinue
 
 Write-Host "== Zip"
 # Instructions right next to the exe: visible both in the archive and after extracting

@@ -19,8 +19,8 @@ from datetime import datetime
 
 import poisk
 
-ФАЙЛ_СОСТОЯНИЯ = poisk.БАЗА / ".кадры.json"
-ФАЙЛ_ЖУРНАЛА = poisk.БАЗА / "журнал.txt"
+ФАЙЛ_СОСТОЯНИЯ = poisk.СЛУЖЕБНАЯ / ".кадры.json"
+ФАЙЛ_ЖУРНАЛА = poisk.СЛУЖЕБНАЯ / "журнал.txt"
 МАКС_ЖУРНАЛ = 2 * 1024 * 1024
 НА_WINDOWS = sys.platform.startswith("win")
 ШРИФТ = "Consolas" if НА_WINDOWS else "Menlo"
@@ -442,7 +442,7 @@ if __name__ == "__main__":
         i = sys.argv.index("--self-test")
         sys.exit(_самопроверка(sys.argv[i + 1] if len(sys.argv) > i + 1 else None))
     root = tk.Tk()
-    замок = poisk.занять_замок(poisk.БАЗА / ".запущено")
+    замок = poisk.занять_замок(poisk.СЛУЖЕБНАЯ / ".запущено")
     if замок is None:
         root.withdraw()
         messagebox.showinfo("Поиск картинок", "Программа уже запущена — посмотрите среди открытых окон.")

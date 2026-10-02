@@ -51,6 +51,49 @@ class УжеСкачано(unittest.TestCase):
         self.assertFalse(poisk._уже_скачано(имя, 3))
 
 
+class ПапкиДанных(unittest.TestCase):
+    def setUp(self):
+        self.дом = Path(tempfile.mkdtemp())
+        self.программа = Path(tempfile.mkdtemp())
+
+    def выбрать(self, **kw):
+        параметры = dict(собрано=True, на_windows=True, папка_программы=self.программа,
+                         дом=self.дом, из_окружения=None)
+        параметры.update(kw)
+        return poisk.выбрать_папки(**параметры)
+
+    def test_windows_рядом_с_exe_служебное_в_internal(self):
+        база, служебная = self.выбрать()
+        self.assertEqual(база, self.программа)
+        self.assertEqual(служебная, self.программа / "_internal" / "данные")
+        self.assertTrue(служебная.is_dir())
+
+    @unittest.skipIf(sys.platform.startswith("win"), "chmod не запрещает запись на Windows")
+    def test_windows_нельзя_писать_рядом_с_exe_значит_документы(self):
+        self.программа.chmod(0o500)
+        try:
+            база, служебная = self.выбрать()
+        finally:
+            self.программа.chmod(0o700)
+        self.assertEqual(база, self.дом / "Documents" / "Поиск картинок")
+        self.assertEqual(служебная, база)
+
+    def test_mac_приложение_в_документах(self):
+        база, служебная = self.выбрать(на_windows=False)
+        self.assertEqual(база, self.дом / "Documents" / "Поиск картинок")
+        self.assertEqual(служебная, база)
+
+    def test_из_исходников_рядом_с_программой(self):
+        for на_windows in (True, False):
+            with self.subTest(на_windows=на_windows):
+                self.assertEqual(self.выбрать(собрано=False, на_windows=на_windows),
+                                 (self.программа, self.программа))
+
+    def test_переменная_окружения_важнее_всего(self):
+        своя = Path(tempfile.mkdtemp()) / "данные"
+        self.assertEqual(self.выбрать(из_окружения=str(своя)), (своя, своя))
+
+
 class Прокрутка(unittest.TestCase):
     def test_windows_колесо_и_тачпад(self):
         for delta, шаги in ((120, -1), (-120, 1), (240, -2), (40, -1), (-40, 1), (0, 0)):

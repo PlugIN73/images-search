@@ -37,8 +37,8 @@ from PIL import Image
 
 if СОБРАНО:
     # Свой Chromium лежит внутри пакета: на Mac — в .app/Contents/Resources,
-    # на Windows — в папке рядом с .exe. В систему ничего не ставится.
-    for _встроенный in (ПАПКА.parent / "Resources" / "ms-playwright", ПАПКА / "ms-playwright"):
+    # на Windows — в служебной папке _internal рядом с .exe. В систему ничего не ставится.
+    for _встроенный in (ПАПКА.parent / "Resources" / "ms-playwright", ПАПКА / "_internal" / "ms-playwright"):
         if _встроенный.is_dir():
             os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(_встроенный)
             break
@@ -53,31 +53,46 @@ def _во_временной_папке(путь):
         return False
 
 
-def _выбрать_базу():
-    """Куда складывать результаты: рядом с программой, а если туда нельзя писать
-    (готовое приложение, запуск из архива) — в Документы."""
-    варианты = []
-    if os.environ.get("POISK_DATA"):
-        варианты.append(Path(os.environ["POISK_DATA"]))
-    if not СОБРАНО and not _во_временной_папке(ПАПКА):
-        варианты.append(ПАПКА)
-    варианты.append(Path.home() / "Documents" / "Поиск картинок")
-    варианты.append(Path.home() / "Поиск картинок")
-    for путь in варианты:
-        try:
-            путь.mkdir(parents=True, exist_ok=True)
-            проба = путь / ".проба"
-            проба.write_text("ok", encoding="utf-8")
-            проба.unlink()
-            return путь
-        except Exception:
+def _можно_писать(путь):
+    try:
+        путь.mkdir(parents=True, exist_ok=True)
+        проба = путь / ".проба"
+        проба.write_text("ok", encoding="utf-8")
+        проба.unlink()
+        return True
+    except Exception:
+        return False
+
+
+def выбрать_папки(собрано, на_windows, папка_программы, дом, из_окружения=None):
+    """Возвращает (база, служебная): в базе лежат «Результаты», в служебной —
+    журнал, список кадров и профили браузера.
+    - из исходников: всё рядом с программой;
+    - готовое приложение на Windows: «Результаты» рядом с .exe, служебное — в _internal;
+    - готовое приложение на Mac (или если рядом с .exe писать нельзя): Документы."""
+    if из_окружения:
+        варианты = [Path(из_окружения)]
+    else:
+        варианты = []
+        if (not собрано or на_windows) and not _во_временной_папке(папка_программы):
+            варианты.append(Path(папка_программы))
+        варианты += [Path(дом) / "Documents" / "Поиск картинок", Path(дом) / "Поиск картинок"]
+    for база in варианты:
+        if not _можно_писать(база):
             continue
-    return Path.home() / "Documents"
+        if собрано and на_windows and база == Path(папка_программы):
+            служебная = база / "_internal" / "данные"
+            if _можно_писать(служебная):
+                return база, служебная
+            continue
+        return база, база
+    запасная = Path(дом) / "Documents"
+    return запасная, запасная
 
 
-БАЗА = _выбрать_базу()
+БАЗА, СЛУЖЕБНАЯ = выбрать_папки(СОБРАНО, sys.platform.startswith("win"), ПАПКА,
+                                Path.home(), os.environ.get("POISK_DATA"))
 ПАПКА_РЕЗУЛЬТАТОВ = БАЗА / "Результаты"
-ПРОФИЛЬ_БРАУЗЕРА = БАЗА / ".браузер"
 
 UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
       "(KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
@@ -329,7 +344,7 @@ def самопроверка(с_яндексом=True):
     картинки открываются. Возвращает True, если всё хорошо."""
     хорошо = True
     say(f"Поиск картинок {ВЕРСИЯ}, {sys.platform}, Python {sys.version.split()[0]}")
-    say(f"Папка данных: {БАЗА}")
+    say(f"Папка данных: {БАЗА} (служебная: {СЛУЖЕБНАЯ})")
     try:
         Image.open(io.BytesIO(_тестовая_картинка())).load()
         say("Pillow: ок")
@@ -540,7 +555,7 @@ def запустить(кадры, сколько=КАРТИНОК_НА_ЗАПР
         метка = f"[{номер_дорожки}]" if дорожек > 1 else ""
         try:
             with sync_playwright() as pw:
-                профиль = str(БАЗА / f".браузер{номер_дорожки if номер_дорожки > 1 else ''}")
+                профиль = str(СЛУЖЕБНАЯ / f".браузер{номер_дорожки if номер_дорожки > 1 else ''}")
                 ctx = открыть_браузер(pw, профиль, args=[
                     f"--window-position={40 + 60 * номер_дорожки},{40 + 40 * номер_дорожки}",
                     "--disk-cache-size=33554432",     # кеш браузера не больше 32 МБ
