@@ -5,6 +5,7 @@
 Это «движок». Окно программы — в файле okno.py, запуск — «Запустить.command».
 """
 import csv
+import glob
 import hashlib
 import io
 import os
@@ -111,9 +112,17 @@ def разделить_номер(текст):
     return (m.group(1), m.group(2).strip()) if m else (None, (текст or "").strip())
 
 
+ЗАПРЕТНЫЕ_ИМЕНА = {"CON", "PRN", "AUX", "NUL",
+                  *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+
+
 def безопасное_имя(s):
-    s = re.sub(r'[\\/:*?"<>|\n\r\t]+', " ", s).strip().strip(".")
-    return s[:80] or "без названия"
+    s = re.sub(r'[\\/:*?"<>|\n\r\t]+', " ", s)
+    # Windows молча отрезает пробелы и точки в конце — обрезаем сами, уже после укорачивания
+    s = s.strip()[:80].strip(" .")
+    if s.split(".")[0].upper() in ЗАПРЕТНЫЕ_ИМЕНА:   # con.jpg на Windows — это устройство, не файл
+        s = "_" + s
+    return s or "без названия"
 
 
 # ---------- браузер и Яндекс ----------
@@ -245,6 +254,9 @@ def открыть_браузер(pw, профиль, headless=False, args=()):
                 профиль, channel=канал or ("chromium" if headless else None), headless=headless, locale="ru-RU",
                 viewport={"width": 1100, "height": 800}, args=list(args))
             ИСПОЛЬЗУЕМЫЙ_БРАУЗЕР[0] = канал or "встроенный Chromium"
+            if канал and ошибки:
+                say(f"  Внимание: встроенный браузер не запустился, работаю через {канал}.\n"
+                    f"  Если что-то пойдёт не так — скачайте программу заново.\n  ({ошибки[0]})")
             return ctx
         except Exception as e:
             текст = str(e)
@@ -254,6 +266,40 @@ def открыть_браузер(pw, профиль, headless=False, args=()):
             ошибки.append(f"{канал or 'chromium'}: {текст.splitlines()[0] if текст else e!r}")
     raise RuntimeError("не смог запустить браузер. Попробуйте скачать программу заново.\n  "
                        + "\n  ".join(ошибки))
+
+
+# ---------- одна копия программы ----------
+def занять_замок(путь):
+    """Не даёт запустить программу дважды с одной папкой данных: два окна
+    делили бы профили браузера и отчёт. Замок снимается сам, когда процесс
+    завершается (даже аварийно). Возвращает открытый файл или None, если занято."""
+    try:
+        f = open(путь, "a+")
+    except OSError:
+        return None
+    try:
+        if sys.platform.startswith("win"):
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return f
+    except OSError:
+        f.close()
+        return None
+
+
+def отпустить_замок(f):
+    try:
+        if sys.platform.startswith("win"):
+            import msvcrt
+            f.seek(0)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        f.close()
+    except OSError:
+        pass
 
 
 # ---------- обновления ----------
@@ -432,7 +478,7 @@ def _уже_скачано(имя, сколько):
     """True, если файлы этого запроса уже лежат в «Результатах»."""
     хвосты = [""] if сколько == 1 else [f"-{i}" for i in range(1, сколько + 1)]
     for хвост in хвосты:
-        if not list(ПАПКА_РЕЗУЛЬТАТОВ.glob(f"{имя}{хвост}.*")):
+        if not list(ПАПКА_РЕЗУЛЬТАТОВ.glob(glob.escape(f"{имя}{хвост}") + ".*")):
             return False
     return True
 

@@ -23,6 +23,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
+      - name: Тесты
+        run: uv run --python 3.11 --with-requirements requirements.txt python -m unittest discover -v tests
       - name: Сборка .app и .dmg
         run: bash packaging/build_mac.sh
       - uses: actions/upload-artifact@v4
@@ -38,6 +40,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Тесты
+        shell: pwsh
+        env:
+          PYTHONUTF8: "1"
+        run: |
+          python -m pip install -r requirements.txt
+          python -m unittest discover -v tests
       - name: Сборка .exe и .zip
         shell: pwsh
         run: ./packaging/build_windows.ps1

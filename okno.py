@@ -127,9 +127,30 @@ def разобрать_строку(line):
     return имя, line, ""
 
 
+def модификаторы(платформа=sys.platform):
+    """Клавиши-модификаторы для Копировать/Вставить. На Windows Tk считает
+    включённый NumLock модификатором Command — с ним любая буква стала бы командой."""
+    return ["Command", "Control"] if платформа == "darwin" else ["Control"]
+
+
+КЛАВИША_ГОТОВО = "Cmd+Enter" if sys.platform == "darwin" else "Ctrl+Enter"
+
+
+def шаги_прокрутки(delta, на_windows=НА_WINDOWS):
+    """Сколько строк прокрутить. Windows шлёт колесо порциями по 120, а тачпад —
+    мелкими (±40); Mac — маленькими числами. Направление сохраняем всегда."""
+    if not delta:
+        return 0
+    if на_windows:
+        шаги = int(delta / 120) or (1 if delta > 0 else -1)
+    else:
+        шаги = delta
+    return -шаги
+
+
 def настроить_клавиши(root):
     for класс in ("TEntry", "Entry", "Text", "TSpinbox"):
-        for mod in ("Command", "Control"):
+        for mod in модификаторы():
             root.bind_class(класс, f"<{mod}-KeyPress>", _горячие_клавиши, add="+")
         for кнопка in ("<Button-2>", "<Button-3>", "<Control-Button-1>"):
             root.bind_class(класс, кнопка, _меню, add="+")
@@ -139,8 +160,9 @@ class Окно:
     def __init__(self, root):
         self.root = root
         root.title(f"Поиск картинок в Яндексе — версия {poisk.ВЕРСИЯ}")
-        root.geometry("980x720")
-        root.minsize(760, 520)
+        м = self._масштаб()
+        root.geometry(f"{int(980 * м)}x{int(720 * м)}")
+        root.minsize(int(760 * м), int(520 * м))
         self.очередь = queue.Queue()
         self.стоп = threading.Event()
         self.поток = None
@@ -252,13 +274,15 @@ class Окно:
     def вставить_списком(self):
         окно = tk.Toplevel(self.root)
         окно.title("Вставить списком")
-        окно.geometry("700x520")
+        м = self._масштаб()
+        окно.geometry(f"{int(700 * м)}x{int(520 * м)}")
         ttk.Label(окно, padding=10, justify="left", text=(
             "Одна строка = один кадр, запросы через |:\n"
             "   53 - кот на подоконнике|кот у окна|кошка подоконник солнце\n"
             "   54 - старый трамвай зимой|трамвай снег город\n"
             "На каждый запрос скачается своя картинка.\n"
-            "Если кадр с таким номером уже есть — он заменится.\nКогда вставил — нажми «Готово» внизу (или Cmd+Enter).")).pack(anchor="w")
+            "Если кадр с таким номером уже есть — он заменится.\n"
+            f"Когда вставил — нажми «Готово» внизу (или {КЛАВИША_ГОТОВО}).")).pack(anchor="w")
         низ = ttk.Frame(окно)
         низ.pack(side="bottom", pady=10)
         поле = tk.Text(окно, wrap="word", font=(ШРИФТ, 12), height=10)
@@ -281,10 +305,21 @@ class Окно:
 
         ttk.Button(низ, text="Вставить из буфера", command=lambda: вставить(поле)).pack(side="left", padx=6)
         ttk.Button(низ, text="✓  Готово — добавить кадры", command=добавить).pack(side="left", padx=6)
-        поле.bind("<Command-Return>", lambda e: (добавить(), "break")[1])
+        поле.bind(f"<{'Command' if sys.platform == 'darwin' else 'Control'}-Return>",
+                  lambda e: (добавить(), "break")[1])
 
     def _колесо(self, e):
-        self.холст.yview_scroll(-1 * (e.delta if abs(e.delta) < 10 else e.delta // 120), "units")
+        self.холст.yview_scroll(шаги_прокрутки(e.delta), "units")
+
+    def _масштаб(self):
+        """Во сколько раз крупнее рисовать окно: на Windows с масштабом экрана
+        125–200% шрифты растут, а размеры в пикселях — нет."""
+        if not НА_WINDOWS:
+            return 1.0
+        try:
+            return max(1.0, float(self.root.tk.call("tk", "scaling")) / (96 / 72))
+        except Exception:
+            return 1.0
 
     # ---------- сохранение ----------
     def загрузить(self):
@@ -407,6 +442,11 @@ if __name__ == "__main__":
         i = sys.argv.index("--self-test")
         sys.exit(_самопроверка(sys.argv[i + 1] if len(sys.argv) > i + 1 else None))
     root = tk.Tk()
+    замок = poisk.занять_замок(poisk.БАЗА / ".запущено")
+    if замок is None:
+        root.withdraw()
+        messagebox.showinfo("Поиск картинок", "Программа уже запущена — посмотрите среди открытых окон.")
+        sys.exit(0)
     настроить_клавиши(root)
     Окно(root)
     root.lift()

@@ -48,5 +48,7 @@ if (Test-Path $Report) { Get-Content $Report -Encoding UTF8 }
 if ($p.ExitCode -ne 0) { throw "Self-test failed (exit code $($p.ExitCode))" }
 
 Write-Host "== Zip"
+# Instructions right next to the exe: visible both in the archive and after extracting
+Copy-Item packaging\windows-readme.txt "dist\$Name\_ПРОЧТИ_МЕНЯ.txt"
 Compress-Archive -Path "dist\$Name" -DestinationPath $Zip -Force
 Write-Host "== Done: $Zip ($([math]::Round((Get-Item $Zip).Length / 1MB)) MB)"
