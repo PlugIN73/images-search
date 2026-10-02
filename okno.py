@@ -1,9 +1,16 @@
 # -*- coding: utf-8 -*-
 """Окно программы «Поиск картинок»."""
-import json
 import os
-import re
 import sys
+
+if sys.platform == "darwin" and not any(os.environ.get(v) for v in ("LC_ALL", "LC_CTYPE", "LANG")):
+    # При запуске из Finder macOS не передаёт кодировку, и Tcl/Tk не может
+    # прочитать свои файлы, если в пути есть русские буквы («Поиск картинок.app»).
+    # Задаём до импорта tkinter.
+    os.environ["LANG"] = "ru_RU.UTF-8"
+
+import json
+import re
 import queue
 import subprocess
 import threading
