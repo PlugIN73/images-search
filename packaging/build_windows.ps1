@@ -1,7 +1,7 @@
 ﻿# Build "Poisk-kartinok" for Windows (folder + zip).
 # Run from the project root in PowerShell:  powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
-# Needs Python 3.11 in PATH (or set $env:PYTHON). The browser is not bundled:
-# the app uses Microsoft Edge, which ships with Windows 10/11.
+# Needs Python 3.11 in PATH (or set $env:PYTHON). Chromium is bundled next to the exe
+# (dist\Poisk-kartinok\ms-playwright), nothing gets installed into the system.
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 
@@ -22,12 +22,21 @@ $Py = "$Build\venv\Scripts\python.exe"
 & $Py -m pip install -r requirements.txt -r packaging\requirements-build.txt
 if ($LASTEXITCODE) { throw "pip install failed" }
 
+Write-Host "== Chromium to bundle"
+$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Resolve-Path $Build) "ms-playwright"
+& $Py -m playwright install chromium --no-shell
+if ($LASTEXITCODE) { throw "playwright install failed" }
+Remove-Item Env:PLAYWRIGHT_BROWSERS_PATH
+
 Write-Host "== PyInstaller"
 & $Py -m PyInstaller --noconfirm --clean --windowed `
   --name $Name `
   --workpath "$Build\work" --specpath $Build --distpath dist `
   okno.py
 if ($LASTEXITCODE) { throw "PyInstaller failed" }
+
+Write-Host "== Bundling Chromium"
+Copy-Item -Recurse "$Build\ms-playwright" "dist\$Name\ms-playwright"
 
 Write-Host "== Self-test"
 $Report = Join-Path (Resolve-Path $Build) "self-test.txt"

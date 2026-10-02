@@ -34,11 +34,13 @@ from PIL import Image
 СОБРАНО = getattr(sys, "frozen", False)      # запущено как готовое приложение (.app / .exe)
 ПАПКА = Path(sys.executable if СОБРАНО else __file__).resolve().parent
 
-if СОБРАНО and sys.platform == "darwin":
-    # В пакете для Mac браузер Chromium лежит внутри приложения.
-    _встроенный = ПАПКА.parent / "Resources" / "ms-playwright"
-    if _встроенный.is_dir():
-        os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(_встроенный)
+if СОБРАНО:
+    # Свой Chromium лежит внутри пакета: на Mac — в .app/Contents/Resources,
+    # на Windows — в папке рядом с .exe. В систему ничего не ставится.
+    for _встроенный in (ПАПКА.parent / "Resources" / "ms-playwright", ПАПКА / "ms-playwright"):
+        if _встроенный.is_dir():
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(_встроенный)
+            break
 
 
 def _во_временной_папке(путь):
@@ -224,11 +226,13 @@ def найти_ссылки(page, запрос, нужно, ритм=None, жд�
 
 
 def _варианты_браузера():
-    """None — Chromium от Playwright, иначе установленный в системе браузер.
-    На Windows всегда есть Edge, поэтому свой Chromium туда не кладём."""
+    """None — свой Chromium (встроенный в пакет); системные Edge и Chrome — запасные."""
     if sys.platform.startswith("win"):
-        return ["msedge", "chrome", None]
+        return [None, "msedge", "chrome"]
     return [None, "chrome"]
+
+
+ИСПОЛЬЗУЕМЫЙ_БРАУЗЕР = [""]
 
 
 def открыть_браузер(pw, профиль, headless=False, args=()):
@@ -237,16 +241,18 @@ def открыть_браузер(pw, профиль, headless=False, args=()):
     for канал in _варианты_браузера():
         try:
             # без окна Playwright ищет отдельный headless-браузер; «chromium» — значит обычный
-            return pw.chromium.launch_persistent_context(
+            ctx = pw.chromium.launch_persistent_context(
                 профиль, channel=канал or ("chromium" if headless else None), headless=headless, locale="ru-RU",
                 viewport={"width": 1100, "height": 800}, args=list(args))
+            ИСПОЛЬЗУЕМЫЙ_БРАУЗЕР[0] = канал or "встроенный Chromium"
+            return ctx
         except Exception as e:
             текст = str(e)
             if "ProcessSingleton" in текст or "SingletonLock" in текст or "already in use" in текст:
                 raise RuntimeError("браузер с этим профилем уже открыт — похоже, программа запущена "
                                    "дважды. Закройте лишнюю копию.") from None
             ошибки.append(f"{канал or 'chromium'}: {текст.splitlines()[0] if текст else e!r}")
-    raise RuntimeError("не нашёл браузер. Установите Microsoft Edge или Google Chrome.\n  "
+    raise RuntimeError("не смог запустить браузер. Попробуйте скачать программу заново.\n  "
                        + "\n  ".join(ошибки))
 
 
@@ -290,7 +296,11 @@ def самопроверка(с_яндексом=True):
             ctx = открыть_браузер(pw, профиль, headless=True)
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.set_content("<p id=x>ok</p>")
-            say(f"Браузер: ок ({ctx.browser.version if ctx.browser else 'запущен'})")
+            say(f"Браузер: ок ({ИСПОЛЬЗУЕМЫЙ_БРАУЗЕР[0]}"
+                f"{', ' + ctx.browser.version if ctx.browser else ''})")
+            if СОБРАНО and ИСПОЛЬЗУЕМЫЙ_БРАУЗЕР[0] != "встроенный Chromium":
+                say("Браузер: ОШИБКА — встроенный Chromium не запустился, сработал запасной")
+                хорошо = False
             if с_яндексом:
                 try:
                     ссылки = найти_ссылки(page, "кот на подоконнике", 4, ждать=False)
