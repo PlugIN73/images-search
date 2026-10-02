@@ -35,6 +35,9 @@ echo "== PyInstaller"
 # Версия в «Об этой программе» / Finder
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :NSHighResolutionCapable bool true" "$APP/Contents/Info.plist" 2>/dev/null || true
+# Кодировка для запуска из Finder (без LANG путь «Поиск картинок.app» с русскими буквами читается не везде)
+/usr/libexec/PlistBuddy -c "Add :LSEnvironment dict" "$APP/Contents/Info.plist" 2>/dev/null || true
+/usr/libexec/PlistBuddy -c "Add :LSEnvironment:LANG string ru_RU.UTF-8" "$APP/Contents/Info.plist" 2>/dev/null || true
 
 echo "== Встраиваю Chromium"
 ditto "$BUILD/ms-playwright" "$APP/Contents/Resources/ms-playwright"

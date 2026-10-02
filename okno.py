@@ -13,6 +13,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import urllib.parse
 import urllib.request
 import webbrowser
@@ -202,6 +203,10 @@ class Действия:
     def окно_закрыто(self):
         self.закрыто.set()
 
+    def окно_открыто(self):
+        # страница загрузилась снова — значит, это была перезагрузка (Cmd+R), а не закрытие
+        self.закрыто.clear()
+
     def поиск_идёт(self, да):
         # Пока идёт поиск, закрытие окна спрашивает «точно?»
         if self.окно is not None:
@@ -270,6 +275,8 @@ def открыть_в_chromium(сервер, действия):
     from playwright.sync_api import sync_playwright
     with sync_playwright() as pw:
         chromium = pw.chromium.executable_path
+    for старый in poisk.СЛУЖЕБНАЯ.glob(".окно-chromium*"):      # остались после сбоя прошлого запуска
+        shutil.rmtree(старый, ignore_errors=True)
     профиль = tempfile.mkdtemp(prefix=".окно-chromium-", dir=poisk.СЛУЖЕБНАЯ)
     процесс = subprocess.Popen([chromium, f"--app={сервер.адрес_окна}", f"--user-data-dir={профиль}",
                                 "--window-size=1040,780", "--no-first-run", "--no-default-browser-check",
@@ -277,8 +284,12 @@ def открыть_в_chromium(сервер, действия):
                                 # не лезть в связку ключей macOS: пароли окну не нужны, а вопрос пугает
                                 "--use-mock-keychain", "--password-store=basic"])
     try:
-        while процесс.poll() is None and not действия.закрыто.wait(0.5):
-            pass
+        while процесс.poll() is None:
+            if действия.закрыто.wait(0.5):
+                # после перезагрузки страница за пару секунд снова спросит состояние и снимет флаг
+                time.sleep(3)
+                if действия.закрыто.is_set():
+                    break
     finally:
         if процесс.poll() is None:
             процесс.terminate()
