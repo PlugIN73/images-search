@@ -403,6 +403,9 @@ def _самопроверка(путь_отчёта):
         import importlib
         importlib.import_module("webview.platforms.cocoa" if НА_MAC else
                                 "webview.platforms.winforms" if НА_WINDOWS else "webview")
+        if НА_WINDOWS:
+            # здесь загружаются .NET-библиотеки WebView2 — то, что ломает отметка «из интернета»
+            importlib.import_module("webview.platforms.edgechromium")
         движок = ""
         if НА_WINDOWS:
             движок = ", WebView2 есть" if есть_webview2() else ", WebView2 нет — окно откроется в Chromium"
