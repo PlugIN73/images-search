@@ -117,5 +117,28 @@ class ОднаКопия(unittest.TestCase):
         poisk.отпустить_замок(второй)
 
 
+
+class ОтметкаИзИнтернета(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith("win"), "отметка хранится в потоке NTFS — только Windows")
+    def test_снимается_со_всех_файлов(self):
+        папка = Path(tempfile.mkdtemp())
+        (папка / "lib").mkdir()
+        файлы = [папка / "a.dll", папка / "lib" / "Б.dll"]
+        for ф in файлы:
+            ф.write_bytes(b"x")
+            with open(str(ф) + ":Zone.Identifier", "w") as поток:
+                поток.write("[ZoneTransfer]\nZoneId=3\n")
+        (папка / "чистый.txt").write_text("x")
+        self.assertEqual(poisk.снять_отметку_интернета(папка), 2)
+        for ф in файлы:
+            self.assertFalse(os.path.exists(str(ф) + ":Zone.Identifier"), ф)
+            self.assertEqual(ф.read_bytes(), b"x")
+
+    def test_на_других_системах_ничего_не_делает(self):
+        if sys.platform.startswith("win"):
+            self.skipTest("только не Windows")
+        self.assertEqual(poisk.снять_отметку_интернета(Path(tempfile.mkdtemp())), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

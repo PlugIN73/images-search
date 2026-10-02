@@ -3,8 +3,8 @@
 
 Само окно — страница на HTML (папка ui/), её обслуживает маленький сервер (most.py).
 Показываем её в окне pywebview: на Mac это встроенный в систему WebKit, на Windows —
-WebView2. Если WebView2 в Windows нет (бывает на старых Windows 10), окно открывается
-во встроенном Chromium, который и так лежит в пакете ради поиска.
+WebView2. Если WebView2 в Windows нет (бывает на старых Windows 10) или он не запустился,
+окно открывается в системном Edge, а без него — во встроенном Chromium.
 """
 import json
 import os
@@ -266,15 +266,30 @@ def открыть_в_pywebview(сервер, действия):
     webview.start(localization=ПЕРЕВОД)
 
 
+def найти_edge():
+    """Путь к системному Microsoft Edge (есть в любой Windows 10/11) или None."""
+    for переменная in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA"):
+        корень = os.environ.get(переменная)
+        if корень:
+            путь = Path(корень) / "Microsoft" / "Edge" / "Application" / "msedge.exe"
+            if путь.is_file():
+                return str(путь)
+    return None
+
+
 def открыть_в_chromium(сервер, действия):
-    """Запасной путь: окно во встроенном Chromium, в режиме приложения (без адресной строки).
+    """Запасной путь: окно в браузере, в режиме приложения (без адресной строки).
+    На Windows — в системном Edge: встроенный Chromium (Chrome for Testing) показывает
+    плашку «только для автоматизированного тестирования». Если Edge нет — во встроенном.
 
     Профиль каждый раз новый: иначе уже работающий Chromium с тем же профилем «забрал» бы
     окно себе, а наш процесс сразу завершился. Конец работы — когда страница сообщила, что её
     закрыли (на Mac сам Chromium после закрытия окна продолжает жить), или когда Chromium вышел."""
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        chromium = pw.chromium.executable_path
+    chromium = найти_edge() if НА_WINDOWS else None
+    if not chromium:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as pw:
+            chromium = pw.chromium.executable_path
     for старый in poisk.СЛУЖЕБНАЯ.glob(".окно-chromium*"):      # остались после сбоя прошлого запуска
         shutil.rmtree(старый, ignore_errors=True)
     профиль = tempfile.mkdtemp(prefix=".окно-chromium-", dir=poisk.СЛУЖЕБНАЯ)
@@ -351,7 +366,7 @@ def main():
             try:
                 открыть_в_pywebview(сервер, действия)
             except Exception as e:
-                в_журнал(f"Окно pywebview не открылось ({e}), открываю во встроенном Chromium.")
+                в_журнал(f"Окно pywebview не открылось ({e}), открываю в браузере.")
                 действия.окно = None
                 открыть_в_chromium(сервер, действия)
     finally:
@@ -422,6 +437,11 @@ def _самопроверка(путь_отчёта):
 
 
 if __name__ == "__main__":
+    if poisk.СОБРАНО and НА_WINDOWS:
+        # до первого импорта pywebview/.NET, иначе библиотеки WebView2 уже не загрузятся
+        снято = poisk.снять_отметку_интернета(poisk.ПАПКА)
+        if снято:
+            в_журнал(f"Снята отметка «скачано из интернета» с файлов программы: {снято}")
     if "--self-test" in sys.argv:
         i = sys.argv.index("--self-test")
         sys.exit(_самопроверка(sys.argv[i + 1] if len(sys.argv) > i + 1 else None))
