@@ -8,6 +8,7 @@ WebView2. Если WebView2 в Windows нет (бывает на старых Wi
 """
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -177,6 +178,7 @@ class Действия:
     def __init__(self, папка_результатов):
         self.папка = папка_результатов
         self.окно = None              # окно pywebview, если оно есть
+        self.закрыто = threading.Event()   # запасное окно в Chromium сообщило, что его закрыли
 
     def открыть_папку(self):
         открыть(self.папка)
@@ -197,6 +199,9 @@ class Действия:
     def звук(self):
         poisk.звук()
 
+    def окно_закрыто(self):
+        self.закрыто.set()
+
     def поиск_идёт(self, да):
         # Пока идёт поиск, закрытие окна спрашивает «точно?»
         if self.окно is not None:
@@ -216,9 +221,15 @@ class Действия:
         return True
 
     def внимание(self):
-        """Капча: на Mac подпрыгивает значок в Dock, на Windows мигает кнопка на панели задач."""
+        """Капча: свёрнутое окно разворачивается; на Mac подпрыгивает значок в Dock,
+        на Windows мигает кнопка на панели задач. Поверх всех окно не выходит —
+        иначе закрыло бы окно браузера с галочкой «Я не робот»."""
         if self.окно is None:
             return
+        try:
+            self.окно.restore()
+        except Exception:
+            pass
         if НА_MAC:
             self._на_главном_потоке(lambda AppKit: AppKit.NSApp.requestUserAttention_(AppKit.NSCriticalRequest))
         elif НА_WINDOWS:
@@ -250,16 +261,32 @@ def открыть_в_pywebview(сервер, действия):
     webview.start(localization=ПЕРЕВОД)
 
 
-def открыть_в_chromium(сервер):
-    """Запасной путь: окно во встроенном Chromium, в режиме приложения (без адресной строки)."""
+def открыть_в_chromium(сервер, действия):
+    """Запасной путь: окно во встроенном Chromium, в режиме приложения (без адресной строки).
+
+    Профиль каждый раз новый: иначе уже работающий Chromium с тем же профилем «забрал» бы
+    окно себе, а наш процесс сразу завершился. Конец работы — когда страница сообщила, что её
+    закрыли (на Mac сам Chromium после закрытия окна продолжает жить), или когда Chromium вышел."""
     from playwright.sync_api import sync_playwright
     with sync_playwright() as pw:
         chromium = pw.chromium.executable_path
-    профиль = poisk.СЛУЖЕБНАЯ / ".окно-chromium"
+    профиль = tempfile.mkdtemp(prefix=".окно-chromium-", dir=poisk.СЛУЖЕБНАЯ)
     процесс = subprocess.Popen([chromium, f"--app={сервер.адрес_окна}", f"--user-data-dir={профиль}",
                                 "--window-size=1040,780", "--no-first-run", "--no-default-browser-check",
-                                "--disable-features=Translate"])
-    процесс.wait()
+                                "--disable-features=Translate",
+                                # не лезть в связку ключей macOS: пароли окну не нужны, а вопрос пугает
+                                "--use-mock-keychain", "--password-store=basic"])
+    try:
+        while процесс.poll() is None and not действия.закрыто.wait(0.5):
+            pass
+    finally:
+        if процесс.poll() is None:
+            процесс.terminate()
+            try:
+                процесс.wait(10)
+            except subprocess.TimeoutExpired:
+                процесс.kill()
+        shutil.rmtree(профиль, ignore_errors=True)
 
 
 def нужен_chromium():
@@ -308,14 +335,14 @@ def main():
 
     try:
         if нужен_chromium():
-            открыть_в_chromium(сервер)
+            открыть_в_chromium(сервер, действия)
         else:
             try:
                 открыть_в_pywebview(сервер, действия)
             except Exception as e:
                 в_журнал(f"Окно pywebview не открылось ({e}), открываю во встроенном Chromium.")
                 действия.окно = None
-                открыть_в_chromium(сервер)
+                открыть_в_chromium(сервер, действия)
     finally:
         прил.остановить()
         сервер.остановить()

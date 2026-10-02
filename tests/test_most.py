@@ -117,15 +117,35 @@ class Страница(ОбщееДляМоста):
     def test_кривая_длина_тела_не_вешает_сервер(self):
         import http.client
         порт = self.сервер.http.server_address[1]
-        for длина in ("-1", "abc"):
+        for длина, код in (("-1", 200), ("abc", 400)):
             with self.subTest(длина=длина):
                 с = http.client.HTTPConnection("127.0.0.1", порт, timeout=5)
                 с.putrequest("POST", "/api/" + urllib.parse.quote("настройки"))
                 с.putheader("X-Token", self.сервер.ключ)
                 с.putheader("Content-Length", длина)
                 с.endheaders()
-                self.assertEqual(с.getresponse().status, 200)
+                self.assertEqual(с.getresponse().status, код)
                 с.close()
+        self.assertEqual(self.запрос("api/состояние")["сколько"], 2)   # сервер жив
+
+    def test_испорченный_запрос_не_стирает_список(self):
+        import http.client
+        self.запрос("api/кадры", {"кадры": [{"имя": "1", "ru": "кот"}]}, "PUT")
+        порт = self.сервер.http.server_address[1]
+        for тело in (b"{oops", b'{"\u043a": 1}', b"[]"):
+            with self.subTest(тело=тело):
+                с = http.client.HTTPConnection("127.0.0.1", порт, timeout=5)
+                с.request("PUT", "/api/" + urllib.parse.quote("кадры"), body=тело,
+                          headers={"X-Token": self.сервер.ключ, "Content-Type": "application/json"})
+                self.assertEqual(с.getresponse().status, 400)
+                с.close()
+        self.assertEqual(len(self.запрос("api/состояние")["кадры"]), 1)
+
+    def test_слишком_большая_вставка(self):
+        with self.assertRaises(urllib.error.HTTPError) as e:
+            self.запрос("api/вставить", {"текст": "кот\n" * 3_000_000})
+        self.assertEqual(e.exception.code, 400)
+        self.assertIn("слишком", json.loads(e.exception.read())["ошибка"])
 
     def test_api_без_ключа_нельзя(self):
         with self.assertRaises(urllib.error.HTTPError) as e:
@@ -255,6 +275,20 @@ class ПревьюИДействия(ОбщееДляМоста):
         with self.assertRaises(urllib.error.HTTPError) as e:
             self.запрос("превью?ф=кот.jpg", ключ=False)
         self.assertEqual(e.exception.code, 403)
+
+    def test_окно_закрыли(self):
+        # запасное окно в Chromium сообщает о закрытии маячком — без заголовков, ключ в адресе
+        r = urllib.request.Request(self.сервер.адрес + "api/" + urllib.parse.quote("закрыто")
+                                   + f"?k={self.сервер.ключ}", data=b"", method="POST")
+        urllib.request.urlopen(r, timeout=5).read()
+        self.assertIn(("окно_закрыто",), self.действия.вызовы)
+
+    def test_окно_закрыли_только_с_ключом(self):
+        r = urllib.request.Request(self.сервер.адрес + "api/" + urllib.parse.quote("закрыто") + "?k=chuzhoy",
+                                   data=b"", method="POST")
+        with self.assertRaises(urllib.error.HTTPError):
+            urllib.request.urlopen(r, timeout=5)
+        self.assertNotIn(("окно_закрыто",), self.действия.вызовы)
 
     def test_действия_окна(self):
         (self.результаты / "53 - кот-1.jpg").write_bytes(b"x")

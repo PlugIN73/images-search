@@ -135,6 +135,7 @@ kbd { font: 500 12px "Onest", sans-serif; opacity: .7; }
 .frame.waiting .num { color: var(--faint); }
 .queries { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; min-height: 34px; align-items: center; border-radius: 8px; cursor: text; }
 .queries.editing { display: block; cursor: auto; }
+.queries:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 .q {
   display: inline-flex; align-items: center; gap: 8px; max-width: 100%; min-height: 34px;
   background: var(--surface-2); border-radius: 8px; padding: 4px 5px 4px 10px; font-size: 13.5px;
@@ -234,6 +235,11 @@ kbd { font: 500 12px "Onest", sans-serif; opacity: .7; }
 .primary svg { width: 18px; height: 18px; stroke-width: 2.2; }
 .primary[disabled] { filter: grayscale(.6); opacity: .5; box-shadow: none; pointer-events: none; }
 .primary.small { height: 36px; font-size: 14px; padding: 0 16px; }
+/* после поиска главная кнопка — «Открыть папку», а «Найти снова» уходит на второй план */
+.primary.quiet { background: var(--surface); color: var(--text); border: 1px solid var(--line); box-shadow: none; font-size: 14px; }
+.btn.accent { background: var(--accent); color: var(--accent-text); border-color: transparent; font-weight: 600;
+  box-shadow: 0 6px 16px -6px var(--accent-shadow); }
+.btn.accent:hover { background: var(--accent); filter: brightness(1.06); }
 .primary.danger { background: var(--danger); color: #fff; box-shadow: none; }
 .stepper { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; margin-left: 8px; white-space: nowrap; }
 .stepper .box { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 9px; background: var(--surface); height: 34px; }

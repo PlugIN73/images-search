@@ -42,6 +42,16 @@ class УжеСкачано(unittest.TestCase):
     def tearDown(self):
         poisk.ПАПКА_РЕЗУЛЬТАТОВ = self.было
 
+    def test_недокачанный_файл_не_считается(self):
+        # картинка пишется во временный файл «.~…» и переименовывается, только когда записана целиком
+        (poisk.ПАПКА_РЕЗУЛЬТАТОВ / ".~кот-1.jpg").write_bytes(b"x")
+        self.assertFalse(poisk._уже_скачано("кот", 1) or poisk._уже_скачано("кот", 2))
+
+    def test_сохранить_целиком(self):
+        poisk.сохранить_целиком(poisk.ПАПКА_РЕЗУЛЬТАТОВ / "кот-1.jpg", b"picture")
+        self.assertEqual((poisk.ПАПКА_РЕЗУЛЬТАТОВ / "кот-1.jpg").read_bytes(), b"picture")
+        self.assertEqual([f.name for f in poisk.ПАПКА_РЕЗУЛЬТАТОВ.iterdir()], ["кот-1.jpg"])
+
     def test_квадратные_скобки_в_имени(self):
         имя = "5 - фото [1942] архив"
         (poisk.ПАПКА_РЕЗУЛЬТАТОВ / f"{имя}-1.jpg").write_bytes(b"x")

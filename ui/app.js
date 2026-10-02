@@ -38,18 +38,32 @@ function принять(новое) {
 let очередьСохранений = Promise.resolve();
 
 // Изменить список: «изменить» получает свежий список и правит его.
-// Сохранения идут строго по очереди, поэтому два быстрых изменения не затирают друг друга.
+// Сохранения идут строго по очереди, поэтому два быстрых изменения не затирают друг друга,
+// а ошибка в одном не останавливает следующие.
 function изменитьКадры(изменить) {
   очередьСохранений = очередьСохранений.then(async () => {
-    const кадры = кадрыСейчас();
-    изменить(кадры);
     try {
+      const кадры = кадрыСейчас();
+      if (изменить(кадры) === false) return;
       принять(await api("кадры", { кадры }, "PUT"));
     } catch (e) {
       сообщить(e.message);
     }
   });
   return очередьСохранений;
+}
+
+// Строку запоминаем не только по месту, но и по содержимому: пока сохранение ждёт очереди,
+// список мог сдвинуться (например, удалили строку выше).
+function снимок(i) {
+  const к = сост.кадры[i];
+  return к ? { i, имя: к.номер, ru: к.ru } : null;
+}
+
+function найтиСтроку(кадры, сн) {
+  if (!сн) return -1;
+  const та = к => к && к.имя === сн.имя && к.ru === сн.ru;
+  return та(кадры[сн.i]) ? сн.i : кадры.findIndex(та);
 }
 
 function кадрыСейчас() {
@@ -209,8 +223,11 @@ function нарисоватьСписок() {
   список.innerHTML = сост.кадры.map((к, i) => {
     const st = статусКадра(к);
     return `<div class="frame ${st === "active" ? "active" : st}" data-i="${i}">` +
-      `<input class="num" value="${экран(к.номер)}" placeholder="№" inputmode="numeric" aria-label="Номер кадра"${сост.идёт ? " disabled" : ""}>` +
-      `<div class="queries${правка === i ? " editing" : ""}">${плашки(к, i)}</div>` +
+      `<input class="num" value="${экран(к.номер)}" placeholder="№" inputmode="numeric" aria-label="Номер кадра"` +
+      `${к.номер ? "" : ' title="Без номера: у картинок этого кадра не будет номера в имени файла"'}${сост.идёт ? " disabled" : ""}>` +
+      (правка === i
+        ? `<div class="queries editing">${плашки(к, i)}</div>`
+        : `<div class="queries"${сост.идёт ? "" : ` tabindex="0" role="button" aria-label="Запросы кадра ${экран(к.номер)}: ${экран(к.ru) || "пусто"}. Enter — изменить"`}>${плашки(к, i)}</div>`) +
       `<div class="side"><span class="status">${ЗНАЧКИ[st] || ""}</span>` +
       `<button class="del" tabindex="-1" aria-label="Удалить кадр ${экран(к.номер)}" title="Удалить кадр">${КРЕСТИК}</button></div></div>`;
   }).join("");
@@ -310,6 +327,11 @@ function нарисовать() {
   $("дорожек").textContent = сост.дорожек;
   $("совет").textContent = сост.дорожек >= 3 ? "чаще капча" : "";
   document.querySelectorAll("[data-lock]").forEach(b => { b.disabled = сост.идёт; });
+  // после поиска главное — посмотреть, что скачалось
+  const и = поиск.итог;
+  const папкаГлавная = Boolean(и && !сост.идёт && !и.сломалось && !и.остановлено);
+  $("найти").classList.toggle("quiet", папкаГлавная);
+  $("папка").classList.toggle("accent", папкаГлавная);
   $("найти").disabled = сост.идёт || !запросов;
   $("стоп").disabled = !сост.идёт || поиск.останавливаю;
   $("найти-текст").textContent = поиск.итог && !сост.идёт ? "Найти снова" : "Найти картинки";
@@ -338,11 +360,15 @@ function начатьПравку(i) {
 function закончитьПравку(сохранить) {
   const ввод = $("список").querySelector(".edit");
   if (правка === null || !ввод) return очередьСохранений;
-  const i = правка;
+  const сн = снимок(правка);
   const текст = ввод.value.trim();
   правка = null;
-  if (сохранить && текст !== сост.кадры[i].ru) {
-    return изменитьКадры(кадры => { кадры[i].ru = текст; });
+  if (сохранить && сн && текст !== сн.ru) {
+    return изменитьКадры(кадры => {
+      const j = найтиСтроку(кадры, сн);
+      if (j < 0) return false;
+      кадры[j].ru = текст;
+    });
   }
   нарисоватьСписок();
   return очередьСохранений;
@@ -369,7 +395,13 @@ $("список").addEventListener("click", e => {
   if (!строка) return;
   const i = Number(строка.dataset.i);
   if (e.target.closest(".del")) {
-    изменитьКадры(кадры => { кадры.splice(i, 1); });
+    // двойной клик не удалит соседнюю строку: второй раз эта строка уже не найдётся
+    const сн = снимок(i);
+    изменитьКадры(кадры => {
+      const j = найтиСтроку(кадры, сн);
+      if (j < 0) return false;
+      кадры.splice(j, 1);
+    });
     return;
   }
   if (e.target.closest(".queries") && !e.target.closest(".edit") && правка !== i) начатьПравку(i);
@@ -381,6 +413,10 @@ $("список").addEventListener("keydown", e => {
     if (e.key === "Escape") { e.preventDefault(); закончитьПравку(false); }
   }
   if (e.target.classList.contains("num") && e.key === "Enter") e.target.blur();
+  if (e.target.classList.contains("queries") && (e.key === "Enter" || e.key === " ")) {
+    e.preventDefault();
+    начатьПравку(Number(e.target.closest(".frame").dataset.i));
+  }
 });
 
 $("список").addEventListener("focusout", e => {
@@ -388,9 +424,18 @@ $("список").addEventListener("focusout", e => {
   if (e.target.classList.contains("num")) {
     const i = Number(e.target.closest(".frame").dataset.i);
     const номер = e.target.value.trim();
-    if (сост.кадры[i] && номер !== сост.кадры[i].номер) {
-      изменитьКадры(кадры => { кадры[i].имя = номер; });
+    const сн = снимок(i);
+    if (!сн || номер === сн.имя) return;
+    if (!номер) {
+      e.target.value = сн.имя;
+      сообщить("У кадра должен быть номер: по нему называются файлы с картинками.");
+      return;
     }
+    изменитьКадры(кадры => {
+      const j = найтиСтроку(кадры, сн);
+      if (j < 0) return false;
+      кадры[j].имя = номер;
+    });
   }
 });
 
@@ -529,6 +574,11 @@ function русскаяРаскладка(e) {
     case "KeyZ": e.preventDefault(); document.execCommand(e.shiftKey ? "redo" : "undo"); break;
   }
 }
+
+// Окно в Chromium: сказать программе, что его закрыли, — иначе на Mac она так и осталась бы работать.
+window.addEventListener("pagehide", () => {
+  if (!ВНУТРИ_PYWEBVIEW()) navigator.sendBeacon(`/api/закрыто?k=${encodeURIComponent(КЛЮЧ)}`);
+});
 
 window.addEventListener("beforeunload", e => {
   if (сост && сост.идёт && !ВНУТРИ_PYWEBVIEW()) { e.preventDefault(); e.returnValue = ""; }
