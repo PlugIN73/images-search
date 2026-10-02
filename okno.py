@@ -14,6 +14,7 @@ import re
 import queue
 import subprocess
 import threading
+import time
 import webbrowser
 from datetime import datetime
 
@@ -111,20 +112,73 @@ def _меню(event):
     m.tk_popup(event.x_root, event.y_root)
 
 
-def похоже_на_кадр(t):
-    return bool(re.fullmatch(r"(кадр|frame|shot|#|№)?\s*\d+[a-zа-я]?\.?", t.strip(), re.I))
-
-
 def разобрать_строку(line):
     """«4 - запрос|запрос|запрос» → ("4", "запрос|запрос|запрос").
-    Номер кадра остаётся в тексте, его разбирает уже сам поиск."""
-    line = line.strip().lstrip("\ufeff")
+    Без номера в начале → (None, строка); пустая строка → None."""
+    line = line.strip().lstrip("\ufeff").strip()
     if not line:
         return None
     line = re.sub(r"^\s*(?:кадр|frame|shot)\s*(\d+)\s*[:\-–—.)]\s*", r"\1 - ", line, flags=re.I)
-    m = re.match(r"^\s*(\d+)\s*[:\-–—.)]\s*(.+)$", line)
-    имя = m.group(1) if m else None
-    return имя, line, ""
+    return poisk.разделить_номер(line)
+
+
+def следующий_номер(имена):
+    """Номер для нового кадра: на единицу больше самого большого (а не «сколько строк + 1» —
+    после удаления строки номера повторялись бы)."""
+    числа = [int(m.group(1)) for и in имена if (m := re.match(r"\s*(\d+)", и or ""))]
+    return str(max(числа, default=0) + 1)
+
+
+def привести_кадр(имя, ru):
+    """Номер кадра живёт только в поле «Кадр». В старых списках он стоял ещё и в начале
+    запроса, а «Кадр 3» и «без названия» программа придумывала сама."""
+    имя = (имя or "").strip()
+    if poisk.АВТОИМЯ.fullmatch(имя):
+        имя = ""
+    первый, *остальные = (ru or "").split("|")
+    номер, запрос = poisk.разделить_номер(первый)
+    if номер and (not имя or имя == номер):
+        return номер, "|".join([запрос, *остальные])
+    return имя, ru
+
+
+def сводка_вставки(текст):
+    кадры = [к for к in map(разобрать_строку, текст.splitlines()) if к]
+    if not кадры:
+        return "Вставь список в поле ниже."
+    без_номера = sum(1 for номер, _ in кадры if not номер)
+    if без_номера:
+        return (f"Будет кадров: {len(кадры)}, без номера: {без_номера} — "
+                f"у их картинок не будет номера в имени файла.")
+    return f"Будет кадров: {len(кадры)}."
+
+
+def осталось_минут(прошло, сделано, всего):
+    if not сделано:
+        return None
+    return round(прошло / сделано * (всего - сделано) / 60)
+
+
+def текст_прогресса(д, прошло):
+    текст = (f"Кадров готово: {д['кадров_готово']} из {д['кадров']} · "
+             f"запросов: {д['сделано']} из {д['всего']}")
+    минут = осталось_минут(прошло, д["сделано"], д["всего"])
+    if минут is None or д["сделано"] >= д["всего"]:
+        return текст
+    return текст + (f" · осталось ≈ {минут} мин" if минут >= 1 else " · осталось меньше минуты")
+
+
+def число_в_пределах(текст, мин, макс, по_умолчанию):
+    try:
+        число = int(str(текст).strip())
+    except ValueError:
+        return по_умолчанию
+    return max(мин, min(макс, число))
+
+
+def можно_ввести(текст):
+    """В поля-счётчики можно вписать только число из одной-двух цифр."""
+    return текст == "" or (текст.isdigit() and len(текст) <= 2)
 
 
 def модификаторы(платформа=sys.platform):
@@ -148,6 +202,18 @@ def шаги_прокрутки(delta, на_windows=НА_WINDOWS):
     return -шаги
 
 
+def мигнуть(root):
+    """Мигнуть кнопкой программы на панели задач Windows, чтобы капчу заметили.
+    На Mac о капче сообщает звук."""
+    if not НА_WINDOWS:
+        return
+    try:
+        import ctypes
+        ctypes.windll.user32.FlashWindow(int(root.wm_frame(), 16), True)
+    except Exception:
+        pass
+
+
 def настроить_клавиши(root):
     for класс in ("TEntry", "Entry", "Text", "TSpinbox"):
         for mod in модификаторы():
@@ -156,70 +222,129 @@ def настроить_клавиши(root):
             root.bind_class(класс, кнопка, _меню, add="+")
 
 
+# Плашка «Я не робот»: тёплый жёлтый, заметный и в светлой, и в тёмной теме.
+ЦВЕТ_ПЛАШКИ = ("#fff4ce", "#4d3800")
+
+
 class Окно:
     def __init__(self, root):
         self.root = root
-        root.title(f"Поиск картинок в Яндексе — версия {poisk.ВЕРСИЯ}")
+        root.title(f"Поиск картинок — версия {poisk.ВЕРСИЯ}")
         м = self._масштаб()
         root.geometry(f"{int(980 * м)}x{int(720 * м)}")
         root.minsize(int(760 * м), int(520 * м))
+        root.columnconfigure(0, weight=1)
         self.очередь = queue.Queue()
         self.стоп = threading.Event()
         self.поток = None
         self.строки = []
+        self.идёт = False
+        self.капчи = 0
+        self.старт_время = 0.0
+        self.конец_пришёл = False
+        проверка = (root.register(можно_ввести), "%P")
 
-        # --- верх ---
+        # --- новая версия (появляется, только если вышла) ---
+        self.обновление = ttk.Button(root)
+        self.обновление.grid(row=0, column=0, sticky="e", padx=12, pady=(8, 0))
+        self.обновление.grid_remove()
+
+        # --- список кадров ---
         верх = ttk.Frame(root, padding=(12, 10, 12, 0))
-        верх.pack(fill="x")
-        ttk.Label(верх, text="Картинок на каждый запрос:").pack(side="left")
-        self.сколько = tk.IntVar(value=2)
-        ttk.Spinbox(верх, from_=1, to=20, width=4, textvariable=self.сколько).pack(side="left", padx=(6, 18))
-        ttk.Label(верх, text="Браузеров сразу:").pack(side="left")
-        self.дорожек = tk.IntVar(value=2)
-        ttk.Spinbox(верх, from_=1, to=4, width=3, textvariable=self.дорожек).pack(side="left", padx=(6, 18))
-        self.обновление = ttk.Label(верх, text="", foreground="#c0392b", cursor="hand2")
-        self.обновление.pack(side="right")
+        верх.grid(row=1, column=0, sticky="we")
+        self.кнопка_вставить = ttk.Button(верх, text="Вставить списком…", command=self.вставить_списком)
+        self.кнопка_вставить.pack(side="left")
+        self.кнопка_добавить = ttk.Button(верх, text="+ Добавить кадр",
+                                          command=lambda: self.добавить_строку(фокус=True))
+        self.кнопка_добавить.pack(side="left", padx=(8, 0))
+        self.кнопка_очистить = ttk.Button(верх, text="Очистить всё", command=self.очистить)
+        self.кнопка_очистить.pack(side="right")
 
-        # --- таблица кадров ---
         рамка = ttk.Frame(root, padding=(12, 8, 12, 0))
-        рамка.pack(fill="both", expand=True)
-        self.холст = tk.Canvas(рамка, highlightthickness=0, height=220)
+        рамка.grid(row=2, column=0, sticky="nsew")
+        root.rowconfigure(2, weight=1)
+        self.холст = tk.Canvas(рамка, highlightthickness=0, height=int(200 * м))
         прокрутка = ttk.Scrollbar(рамка, orient="vertical", command=self.холст.yview)
         self.таблица = ttk.Frame(self.холст)
+        self.таблица.columnconfigure(1, weight=1)
         self.таблица.bind("<Configure>", lambda e: self.холст.configure(scrollregion=self.холст.bbox("all")))
-        self.холст.create_window((0, 0), window=self.таблица, anchor="nw")
+        окно_таблицы = self.холст.create_window((0, 0), window=self.таблица, anchor="nw")
+        self.холст.bind("<Configure>", lambda e: self.холст.itemconfigure(окно_таблицы, width=e.width))
         self.холст.configure(yscrollcommand=прокрутка.set)
         for i, текст in enumerate(["Кадр", "Запросы (несколько — через |)"]):
-            ttk.Label(self.таблица, text=текст, font=("", 12, "bold")).grid(row=0, column=i, sticky="w", padx=3)
+            ttk.Label(self.таблица, text=текст, font="TkHeadingFont").grid(row=0, column=i, sticky="w", padx=3)
+        self.пусто = ttk.Label(self.таблица, justify="left", padding=(3, 12), text=(
+            "Список пока пуст.\n"
+            "Нажми «Вставить списком…» и вставь сценарий: одна строка — один кадр.\n"
+            "Или добавь кадры по одному кнопкой «+ Добавить кадр»."))
         self.ряд = 0
         self.холст.pack(side="left", fill="both", expand=True)
         прокрутка.pack(side="right", fill="y")
         self.холст.bind_all("<MouseWheel>", self._колесо)
+        self.холст.bind_all("<Button-4>", lambda e: self._колесо(e, -1))
+        self.холст.bind_all("<Button-5>", lambda e: self._колесо(e, 1))
 
-        кнопки = ttk.Frame(root, padding=(12, 6, 12, 0))
-        кнопки.pack(fill="x")
-        ttk.Button(кнопки, text="+ Добавить кадр", command=self.добавить_строку).pack(side="left")
-        ttk.Button(кнопки, text="Вставить списком…", command=self.вставить_списком).pack(side="left", padx=6)
-        ttk.Button(кнопки, text="Очистить всё", command=self.очистить).pack(side="left")
-
-        # --- запуск ---
-        низ = ttk.Frame(root, padding=(12, 10, 12, 0))
-        низ.pack(fill="x")
-        self.кнопка_старт = ttk.Button(низ, text="▶  Найти картинки", command=self.старт)
+        # --- запуск и настройки ---
+        запуск = ttk.Frame(root, padding=(12, 10, 12, 0))
+        запуск.grid(row=3, column=0, sticky="we")
+        self.кнопка_старт = ttk.Button(запуск, text="Найти картинки", command=self.старт, default="active")
         self.кнопка_старт.pack(side="left")
-        self.кнопка_стоп = ttk.Button(низ, text="■  Стоп", command=self.остановить, state="disabled")
-        self.кнопка_стоп.pack(side="left", padx=6)
-        ttk.Button(низ, text="Открыть папку с результатами", command=self.открыть_папку).pack(side="right")
+        self.кнопка_стоп = ttk.Button(запуск, text="Стоп", command=self.остановить, state="disabled")
+        self.кнопка_стоп.pack(side="left", padx=(8, 24))
+        ttk.Label(запуск, text="Картинок на запрос:").pack(side="left")
+        self.сколько = tk.StringVar(value="2")
+        self.поле_сколько = ttk.Spinbox(запуск, from_=1, to=20, width=3, textvariable=self.сколько,
+                                        validate="key", validatecommand=проверка)
+        self.поле_сколько.pack(side="left", padx=(6, 16))
+        ttk.Label(запуск, text="Браузеров сразу:").pack(side="left")
+        self.дорожек = tk.StringVar(value="2")
+        self.поле_дорожек = ttk.Spinbox(запуск, from_=1, to=4, width=3, textvariable=self.дорожек,
+                                        validate="key", validatecommand=проверка)
+        self.поле_дорожек.pack(side="left", padx=(6, 6))
+        self.совет = ttk.Label(запуск, text="")
+        self.совет.pack(side="left")
+        self.дорожек.trace_add("write", lambda *_: self._совет_про_браузеры())
+        self.кнопка_папка = ttk.Button(запуск, text="Открыть папку с результатами", command=self.открыть_папку)
+        self.кнопка_папка.pack(side="right")
 
-        # --- журнал ---
-        журнал_рамка = ttk.Frame(root, padding=12)
-        журнал_рамка.pack(fill="both", expand=True)
-        self.журнал = tk.Text(журнал_рамка, height=12, wrap="word", state="disabled",
-                              font=(ШРИФТ, 11), relief="solid", borderwidth=1)
+        # --- состояние ---
+        состояние = ttk.Frame(root, padding=(12, 10, 12, 0))
+        состояние.grid(row=4, column=0, sticky="we")
+        состояние.columnconfigure(0, weight=1)
+        self.надпись = ttk.Label(состояние, text="")
+        self.надпись.grid(row=0, column=0, sticky="w")
+        self.кнопка_подробно = ttk.Button(состояние, text="Скрыть подробности", command=self._подробности)
+        self.кнопка_подробно.grid(row=0, column=1, sticky="e")
+        self.кнопка_подробно.grid_remove()
+        self.полоса = ttk.Progressbar(состояние, mode="determinate")
+        self.полоса.grid(row=1, column=0, columnspan=2, sticky="we", pady=(6, 0))
+        self.полоса.grid_remove()
+
+        self.плашка = tk.Label(root, justify="left", anchor="w", padx=12, pady=10,
+                               bg=ЦВЕТ_ПЛАШКИ[0], fg=ЦВЕТ_ПЛАШКИ[1], text=(
+                                   "Яндекс просит подтвердить «Я не робот».\n"
+                                   "Поставь галочку в окне браузера — поиск продолжится сам. "
+                                   "Жду 10 минут, потом пропущу этот запрос."))
+        self.плашка.grid(row=5, column=0, sticky="we", padx=12, pady=(10, 0))
+        self.плашка.grid_remove()
+
+        # --- журнал: появляется, когда в нём что-то есть ---
+        self.журнал_рамка = ttk.Frame(root, padding=12)
+        self.журнал_рамка.grid(row=6, column=0, sticky="nsew")
+        self.журнал = tk.Text(self.журнал_рамка, height=8, wrap="word", state="disabled",
+                              font="TkTextFont", relief="solid", borderwidth=1)
         self.журнал.pack(fill="both", expand=True)
+        self.журнал_рамка.grid_remove()
+        self.журнал_виден = False
+        self.журнал_пуст = True
+
+        for mod in модификаторы():
+            root.bind(f"<{mod}-Return>", lambda e: (self.старт(), "break")[1])
 
         self.загрузить()
+        self._ждём_запуска()
         poisk.ВЫВОД[0] = lambda msg: self.очередь.put(msg)
+        poisk.СОБЫТИЯ[0] = lambda тип, данные: self.очередь.put((тип, данные))
         root.protocol("WM_DELETE_WINDOW", self.закрыть)
         root.after(150, self._читать_очередь)
         в_журнал(f"\n=== Запуск {datetime.now():%d.%m.%Y %H:%M}, версия {poisk.ВЕРСИЯ} ===")
@@ -232,40 +357,69 @@ class Окно:
             self.root.after(0, lambda: self._показать_обновление(версия, ссылка))
 
     def _показать_обновление(self, версия, ссылка):
-        self.обновление.configure(text=f"Вышла версия {версия} — скачать")
-        self.обновление.bind("<Button-1>", lambda e: webbrowser.open(ссылка))
-        self.очередь.put(f"Вышла новая версия {версия}. Скачать: {ссылка}")
+        self.обновление.configure(text=f"Вышла версия {версия} — скачать",
+                                  command=lambda: webbrowser.open(ссылка))
+        self.обновление.grid()
+        в_журнал(f"Вышла новая версия {версия}. Скачать: {ссылка}")
+
+    def _совет_про_браузеры(self):
+        много = число_в_пределах(self.дорожек.get(), 1, 4, 2) >= 3
+        self.совет.configure(text="больше браузеров — чаще капча" if много else "")
 
     # ---------- таблица ----------
-    def добавить_строку(self, имя=None, ru="", en=""):
-        n = len(self.строки) + 1
-        имя = имя or f"Кадр {n}"
+    def добавить_строку(self, имя=None, ru="", фокус=False):
+        if имя is None:
+            имя = следующий_номер(с["vars"][0].get() for с in self.строки)
         self.ряд += 1
         р = self.ряд
         vars_ = (tk.StringVar(value=имя), tk.StringVar(value=ru))
         поля = []
-        for i, (v, ширина) in enumerate(zip(vars_, (10, 80))):
+        for i, (v, ширина) in enumerate(zip(vars_, (6, 60))):
             e = ttk.Entry(self.таблица, textvariable=v, width=ширина)
             e.grid(row=р, column=i, padx=3, pady=2, sticky="we")
+            e.bind("<FocusIn>", lambda ev: self._показать(ev.widget), add="+")
             поля.append(e)
-        кнопка = ttk.Button(self.таблица, text="✕", width=2)
+        # ✕ не в порядке Tab: иначе на длинном списке до «Найти» сотни нажатий, а пробел удаляет строку
+        кнопка = ttk.Button(self.таблица, text="✕", width=2, takefocus=0)
         кнопка.grid(row=р, column=2, padx=3)
         строка = {"vars": vars_, "виджеты": поля + [кнопка]}
         кнопка.configure(command=lambda: self.удалить_строку(строка))
         self.строки.append(строка)
-        поля[1].focus_set()
-        self.root.after(50, lambda: self.холст.yview_moveto(1.0))
+        self._обновить_пустоту()
+        if фокус:
+            поля[1].focus_set()
+            self.root.after(50, lambda: self.холст.yview_moveto(1.0))
 
     def удалить_строку(self, строка):
         for w in строка["виджеты"]:
             w.destroy()
         self.строки.remove(строка)
+        self._обновить_пустоту()
+
+    def _обновить_пустоту(self):
+        if self.строки:
+            self.пусто.grid_remove()
+        else:
+            self.пусто.grid(row=1, column=0, columnspan=3, sticky="w")
+        if not self.идёт:
+            self._ждём_запуска()
+
+    def _показать(self, w):
+        """Строка, в которую перешли по Tab, должна быть видна."""
+        self.root.update_idletasks()
+        всего = max(1, self.таблица.winfo_height())
+        видно = self.холст.winfo_height()
+        с = self.холст.canvasy(0)
+        верх, низ = w.winfo_y(), w.winfo_y() + w.winfo_height()
+        if верх < с:
+            self.холст.yview_moveto(верх / всего)
+        elif низ > с + видно:
+            self.холст.yview_moveto((низ - видно) / всего)
 
     def очистить(self):
         if self.строки and messagebox.askyesno("Очистить", "Удалить все кадры из списка?"):
             for с in list(self.строки):
                 self.удалить_строку(с)
-            self.добавить_строку()
 
     def данные(self):
         return [{"имя": с["vars"][0].get().strip(), "ru": с["vars"][1].get().strip()}
@@ -274,42 +428,62 @@ class Окно:
     def вставить_списком(self):
         окно = tk.Toplevel(self.root)
         окно.title("Вставить списком")
+        окно.transient(self.root)
         м = self._масштаб()
         окно.geometry(f"{int(700 * м)}x{int(520 * м)}")
-        ttk.Label(окно, padding=10, justify="left", text=(
-            "Одна строка = один кадр, запросы через |:\n"
+        ttk.Label(окно, padding=12, justify="left", text=(
+            "Одна строка — один кадр. Сначала номер кадра, потом запросы через |:\n"
             "   53 - кот на подоконнике|кот у окна|кошка подоконник солнце\n"
             "   54 - старый трамвай зимой|трамвай снег город\n"
-            "На каждый запрос скачается своя картинка.\n"
-            "Если кадр с таким номером уже есть — он заменится.\n"
-            f"Когда вставил — нажми «Готово» внизу (или {КЛАВИША_ГОТОВО}).")).pack(anchor="w")
-        низ = ttk.Frame(окно)
-        низ.pack(side="bottom", pady=10)
+            "Номер кадра попадёт в имена файлов. Если кадр с таким номером уже есть — он заменится.\n"
+            f"Когда вставишь — нажми «Готово» внизу (или {КЛАВИША_ГОТОВО}).")).pack(anchor="w")
+        низ = ttk.Frame(окно, padding=(12, 8, 12, 12))
+        низ.pack(side="bottom", fill="x")
+        сводка = ttk.Label(низ, text=сводка_вставки(""))
+        сводка.pack(side="top", anchor="w", pady=(0, 8))
         поле = tk.Text(окно, wrap="word", font=(ШРИФТ, 12), height=10)
-        поле.pack(fill="both", expand=True, padx=10)
+        поле.pack(fill="both", expand=True, padx=12)
         поле.focus_set()
         окно.grab_set()
 
+        def обновить_сводку(*_):
+            сводка.configure(text=сводка_вставки(поле.get("1.0", "end")))
+
         def добавить():
-            новые = [разобрать_строку(l) for l in поле.get("1.0", "end").splitlines()]
-            имена = {к[0] for к in новые if к and к[0]}
-            пустые = [с for с in self.строки if not any(v.get().strip() for v in с["vars"][1:])
-                      or с["vars"][0].get().strip() in имена]
-            for с in пустые:
+            новые = [к for к in map(разобрать_строку, поле.get("1.0", "end").splitlines()) if к]
+            номера = {номер for номер, _ in новые if номер}
+            лишние = [с for с in self.строки if not с["vars"][1].get().strip()
+                      or с["vars"][0].get().strip() in номера]
+            for с in лишние:
                 self.удалить_строку(с)
-            for line in поле.get("1.0", "end").splitlines():
-                кадр = разобрать_строку(line)
-                if кадр:
-                    self.добавить_строку(*кадр)
+            for номер, запросы in новые:
+                self.добавить_строку(номер or "", запросы)
+            self.root.after(50, lambda: self.холст.yview_moveto(1.0))
             окно.destroy()
 
-        ttk.Button(низ, text="Вставить из буфера", command=lambda: вставить(поле)).pack(side="left", padx=6)
-        ttk.Button(низ, text="✓  Готово — добавить кадры", command=добавить).pack(side="left", padx=6)
+        def из_буфера():
+            вставить(поле)
+            обновить_сводку()
+
+        поле.bind("<KeyRelease>", обновить_сводку, add="+")
+        поле.bind("<<Paste>>", lambda e: окно.after(10, обновить_сводку), add="+")
+        ttk.Button(низ, text="Вставить из буфера", command=из_буфера).pack(side="left")
+        ttk.Button(низ, text="Готово — добавить кадры", command=добавить,
+                   default="active").pack(side="left", padx=(8, 0))
+        ttk.Button(низ, text="Отмена", command=окно.destroy).pack(side="right")
+        окно.bind("<Escape>", lambda e: окно.destroy())
         поле.bind(f"<{'Command' if sys.platform == 'darwin' else 'Control'}-Return>",
                   lambda e: (добавить(), "break")[1])
 
-    def _колесо(self, e):
-        self.холст.yview_scroll(шаги_прокрутки(e.delta), "units")
+    def _колесо(self, e, шаги=None):
+        # Колесо крутит список, только когда мышь над ним: журнал и окно вставки прокручиваются сами.
+        try:
+            под_мышью = str(self.root.winfo_containing(e.x_root, e.y_root) or "")
+        except KeyError:   # под мышью виджет, о котором Python не знает (выпадающий список и т. п.)
+            return
+        if not под_мышью.startswith(str(self.холст)):
+            return
+        self.холст.yview_scroll(шаги if шаги is not None else шаги_прокрутки(e.delta), "units")
 
     def _масштаб(self):
         """Во сколько раз крупнее рисовать окно: на Windows с масштабом экрана
@@ -325,11 +499,10 @@ class Окно:
     def загрузить(self):
         try:
             for к in json.loads(ФАЙЛ_СОСТОЯНИЯ.read_text(encoding="utf-8")):
-                self.добавить_строку(к.get("имя"), к.get("ru", ""), к.get("en", ""))
+                self.добавить_строку(*привести_кадр(к.get("имя"), к.get("ru", "")))
         except Exception:
             pass
-        if not self.строки:
-            self.добавить_строку()
+        self._обновить_пустоту()
 
     def сохранить(self):
         try:
@@ -337,27 +510,78 @@ class Окно:
         except Exception:
             pass
 
+    # ---------- состояние ----------
+    def _ждём_запуска(self):
+        if self.строки:
+            self._надпись(f"Кадров в списке: {len(self.строки)}. Нажми «Найти картинки» "
+                          f"(или {КЛАВИША_ГОТОВО}).")
+        else:
+            self._надпись("Вставь список кадров, чтобы начать.")
+
+    def _надпись(self, текст):
+        self.надпись.configure(text=текст)
+
+    def _главная(self, кнопка):
+        """Выделенная кнопка — та, что нужна следующей: «Найти» до поиска, «Открыть папку» после."""
+        for к in (self.кнопка_старт, self.кнопка_папка):
+            к.configure(default="active" if к is кнопка else "normal")
+
+    def _заблокировать(self, да):
+        """Пока идёт поиск, список и настройки не меняются: правки всё равно не учлись бы."""
+        состояние = "disabled" if да else "normal"
+        for с in self.строки:
+            for w in с["виджеты"]:
+                w.configure(state=состояние)
+        for w in (self.кнопка_вставить, self.кнопка_добавить, self.кнопка_очистить,
+                  self.поле_сколько, self.поле_дорожек):
+            w.configure(state=состояние)
+        self.кнопка_старт.configure(state="disabled" if да else "normal")
+        self.кнопка_стоп.configure(state="normal" if да else "disabled")
+
+    def _подробности(self, показать=None):
+        self.журнал_виден = not self.журнал_виден if показать is None else показать
+        if self.журнал_виден:
+            self.журнал_рамка.grid()
+            self.root.rowconfigure(6, weight=1)
+        else:
+            self.журнал_рамка.grid_remove()
+            self.root.rowconfigure(6, weight=0)
+        self.кнопка_подробно.configure(text="Скрыть подробности" if self.журнал_виден else "Показать подробности")
+        self.кнопка_подробно.grid()
+
+    def _плашка_капчи(self, показать):
+        if показать:
+            self.плашка.grid()
+            if self.root.state() == "iconic":
+                self.root.deiconify()
+            мигнуть(self.root)
+        else:
+            self.плашка.grid_remove()
+
     # ---------- запуск ----------
     def старт(self):
+        if self.идёт:
+            return
         кадры = [к for к in self.данные() if к["ru"]]
         if not кадры:
-            messagebox.showinfo("Нет запросов", "Впиши хотя бы один запрос.")
+            messagebox.showinfo("Нет запросов", "Нажми «Вставить списком…» и вставь сценарий "
+                                                "или впиши запросы хотя бы в один кадр.")
             return
-        for к in кадры:
-            if not к["имя"]:
-                к["имя"] = "без названия"
         self.сохранить()
-        try:
-            сколько = max(1, int(self.сколько.get()))
-        except Exception:
-            сколько = 2
-        try:
-            дорожек = max(1, min(4, int(self.дорожек.get())))
-        except Exception:
-            дорожек = 3
+        сколько = число_в_пределах(self.сколько.get(), 1, 20, 2)
+        дорожек = число_в_пределах(self.дорожек.get(), 1, 4, 2)
+        self.сколько.set(str(сколько))
+        self.дорожек.set(str(дорожек))
         self.стоп.clear()
-        self.кнопка_старт.configure(state="disabled")
-        self.кнопка_стоп.configure(state="normal")
+        self.идёт = True
+        self.капчи = 0
+        self.конец_пришёл = False
+        self.старт_время = time.time()
+        self._заблокировать(True)
+        self._главная(None)
+        self._надпись("Запускаю браузер… Он откроется отдельным окном — его не закрывай.")
+        self.полоса.configure(value=0, maximum=1)
+        self.полоса.grid()
         self.поток = threading.Thread(target=self._работа, args=(кадры, сколько, дорожек), daemon=True)
         self.поток.start()
 
@@ -365,29 +589,88 @@ class Окно:
         try:
             poisk.запустить(кадры, сколько, self.стоп, дорожек)
         except Exception as e:
-            self.очередь.put(f"\nОшибка: {e}")
+            self.очередь.put(f"\nЧто-то пошло не так: {e}\n"
+                             "Запусти снова — уже скачанное пропустится. Если повторяется — "
+                             "пришли разработчику файл журнал.txt.")
         self.очередь.put(None)
 
     def остановить(self):
         self.стоп.set()
-        self.очередь.put("Останавливаю после текущей картинки...")
+        self.кнопка_стоп.configure(state="disabled")
+        текст = "Останавливаю: дождусь, пока закончатся текущие запросы…"
+        self._надпись(текст)
+        self.очередь.put(текст)
+
+    def _событие(self, тип, д):
+        if тип in ("начало", "запрос"):
+            self.полоса.configure(maximum=max(1, д["всего"]), value=д["сделано"])
+            if not self.стоп.is_set():
+                self._надпись(текст_прогресса(д, time.time() - self.старт_время))
+        elif тип == "капча":
+            self.капчи += 1
+            self._плашка_капчи(True)
+        elif тип == "капча_прошла":
+            self.капчи = max(0, self.капчи - 1)
+            if not self.капчи:
+                self._плашка_капчи(False)
+        elif тип == "конец":
+            self._конец(д)
+
+    def _конец(self, д):
+        self.конец_пришёл = True
+        self.капчи = 0
+        self._плашка_капчи(False)
+        self.полоса.grid_remove()
+        if д.get("нечего"):
+            self._надпись("Всё из списка уже скачано. Новые кадры добавь в список и запусти снова.")
+            self._главная(self.кнопка_папка)
+            return
+        if д["остановлено"]:
+            self._надпись("Остановлено. Запусти снова — уже скачанное пропустится.")
+            self._главная(self.кнопка_старт)
+            return
+        пустые = len(д["пустые"])
+        текст = f"Готово за {д['минут']:.0f} мин: картинки есть по {д['найдено']} запросам"
+        if пустые:
+            текст += f", по {пустые} ничего не нашлось — список в подробностях."
+            self._подробности(True)
+        else:
+            текст += "."
+        self._надпись(текст)
+        self._главная(self.кнопка_папка)
+        poisk.звук()
+
+    def _завершено(self):
+        """Поток поиска закончился — сам или с ошибкой."""
+        if self.идёт and not self.конец_пришёл:
+            # поиск прервался с ошибкой
+            self._надпись("Поиск прервался — подробности ниже.")
+            self._подробности(True)
+            self._главная(self.кнопка_старт)
+        self.идёт = False
+        self.полоса.grid_remove()
+        self._плашка_капчи(False)
+        self._заблокировать(False)
 
     def _читать_очередь(self):
         try:
             while True:
                 msg = self.очередь.get_nowait()
                 if msg is None:
-                    self.кнопка_старт.configure(state="normal")
-                    self.кнопка_стоп.configure(state="disabled")
+                    self._завершено()
+                    continue
+                if isinstance(msg, tuple):
+                    self._событие(*msg)
                     continue
                 в_консоль(msg)
                 в_журнал(msg)
+                if self.журнал_пуст:
+                    self.журнал_пуст = False
+                    self._подробности(True)
                 self.журнал.configure(state="normal")
                 self.журнал.insert("end", msg + "\n")
                 self.журнал.see("end")
                 self.журнал.configure(state="disabled")
-                if "Я не робот" in msg:
-                    self.root.bell()
         except queue.Empty:
             pass
         self.root.after(150, self._читать_очередь)
@@ -403,9 +686,14 @@ class Окно:
             else:
                 subprocess.Popen(["xdg-open", путь])
         except Exception as e:
-            messagebox.showinfo("Папка с результатами", f"{путь}\n\n({e})")
+            messagebox.showinfo("Папка с результатами", f"Не получилось открыть папку сама — "
+                                                        f"открой её вручную:\n{путь}\n\n({e})")
 
     def закрыть(self):
+        if self.идёт and not messagebox.askyesno(
+                "Поиск ещё идёт", "Остановить поиск и закрыть программу?\n"
+                                  "Скачанное сохранится, а при следующем запуске уже скачанное пропустится."):
+            return
         self.сохранить()
         self.стоп.set()
         self.root.destroy()
@@ -445,7 +733,7 @@ if __name__ == "__main__":
     замок = poisk.занять_замок(poisk.СЛУЖЕБНАЯ / ".запущено")
     if замок is None:
         root.withdraw()
-        messagebox.showinfo("Поиск картинок", "Программа уже запущена — посмотрите среди открытых окон.")
+        messagebox.showinfo("Поиск картинок", "Программа уже запущена — поищи её среди открытых окон.")
         sys.exit(0)
     настроить_клавиши(root)
     Окно(root)
