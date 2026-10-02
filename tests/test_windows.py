@@ -13,7 +13,6 @@ os.environ["POISK_DATA"] = _ДАННЫЕ
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import poisk  # noqa: E402
-import okno  # noqa: E402
 
 
 class ИменаФайлов(unittest.TestCase):
@@ -92,27 +91,6 @@ class ПапкиДанных(unittest.TestCase):
     def test_переменная_окружения_важнее_всего(self):
         своя = Path(tempfile.mkdtemp()) / "данные"
         self.assertEqual(self.выбрать(из_окружения=str(своя)), (своя, своя))
-
-
-class Прокрутка(unittest.TestCase):
-    def test_windows_колесо_и_тачпад(self):
-        for delta, шаги in ((120, -1), (-120, 1), (240, -2), (40, -1), (-40, 1), (0, 0)):
-            with self.subTest(delta=delta):
-                self.assertEqual(okno.шаги_прокрутки(delta, на_windows=True), шаги)
-
-    def test_mac(self):
-        for delta, шаги in ((3, -3), (-1, 1), (0, 0)):
-            with self.subTest(delta=delta):
-                self.assertEqual(okno.шаги_прокрутки(delta, на_windows=False), шаги)
-
-
-class ГорячиеКлавиши(unittest.TestCase):
-    def test_на_windows_только_ctrl(self):
-        # На Windows Tk считает включённый NumLock модификатором Command
-        self.assertEqual(okno.модификаторы("win32"), ["Control"])
-
-    def test_на_mac_cmd_и_ctrl(self):
-        self.assertEqual(okno.модификаторы("darwin"), ["Command", "Control"])
 
 
 class ОднаКопия(unittest.TestCase):

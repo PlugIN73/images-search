@@ -29,12 +29,13 @@ echo "== PyInstaller"
   --name "$NAME" \
   --osx-bundle-identifier "io.github.plugin73.poisk-kartinok" \
   --workpath "$BUILD/work" --specpath "$BUILD" --distpath dist \
+  --add-data "$PWD/ui:ui" \
   okno.py
 
 # Версия в «Об этой программе» / Finder
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :NSHighResolutionCapable bool true" "$APP/Contents/Info.plist" 2>/dev/null || true
-# Кодировка для запуска из Finder (без неё Tcl/Tk не читает путь с русскими буквами)
+# Кодировка для запуска из Finder: путь «Поиск картинок.app» с русскими буквами
 /usr/libexec/PlistBuddy -c "Add :LSEnvironment dict" "$APP/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :LSEnvironment:LANG string ru_RU.UTF-8" "$APP/Contents/Info.plist" 2>/dev/null || true
 

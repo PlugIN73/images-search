@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="ru" data-key="{{КЛЮЧ}}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Поиск картинок в Яндексе</title>
+<link rel="stylesheet" href="/ui/app.css">
+</head>
+<body>
+<div class="app" id="app" data-state="загрузка">
+
+  <header class="head">
+    <h1>Кадры <span id="счёт"></span></h1>
+    <button class="update" id="обновление" hidden></button>
+    <button class="btn" id="вставить" data-lock>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/><path d="M9 12h6M9 16h4"/></svg>
+      Вставить списком
+    </button>
+    <button class="btn" id="добавить" data-lock>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+      Кадр
+    </button>
+    <button class="btn ghost" id="очистить" data-lock>Очистить</button>
+  </header>
+
+  <main class="list" id="список" aria-label="Кадры"></main>
+
+  <section class="empty" id="пусто">
+    <div class="empty-inner">
+      <svg class="art" viewBox="0 0 84 64" aria-hidden="true">
+        <rect x="2" y="8" width="80" height="48" rx="6"/>
+        <path d="M2 18h80M2 46h80"/>
+        <path d="M10 8v10M22 8v10M34 8v10M46 8v10M58 8v10M70 8v10M10 46v10M22 46v10M34 46v10M46 46v10M58 46v10M70 46v10"/>
+        <path d="M28 40l9-10 7 7 5-5 8 8"/>
+        <circle cx="52" cy="26" r="2.5"/>
+      </svg>
+      <h2>Вставь сценарий — найду картинки к каждому кадру</h2>
+      <p>Одна строка — один кадр. Сначала номер, потом запросы через&nbsp;|</p>
+<pre><b>53</b> - кот на подоконнике|кот у окна|кошка подоконник солнце
+<b>54</b> - старый трамвай зимой|трамвай снег город</pre>
+      <button class="primary" id="вставить-пусто">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/></svg>
+        Вставить списком
+      </button>
+    </div>
+  </section>
+
+  <footer class="dock">
+    <div class="banner" id="капча" role="alert" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+      <div class="t"><b>Яндекс просит подтвердить «Я не робот».</b> Поставь галочку в окне браузера — поиск продолжится сам.</div>
+      <div class="timer" id="капча-время"></div>
+    </div>
+
+    <div class="result" id="итог" hidden>
+      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="m8 12 3 3 5-6"/></svg>
+      <div class="t" id="итог-текст"></div>
+      <button class="link" data-подробности>Подробности</button>
+      <button class="close" id="итог-закрыть" aria-label="Скрыть">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+
+    <div class="progress" id="прогресс" hidden>
+      <div class="row"><span id="прогресс-текст"></span><span class="right"><span id="прогресс-осталось"></span><button class="link" data-подробности>Подробности</button></span></div>
+      <div class="bar"><i id="полоса"></i></div>
+    </div>
+
+    <div class="log" id="журнал" hidden tabindex="0" aria-label="Подробности"></div>
+
+    <div class="actions">
+      <button class="primary" id="найти">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span id="найти-текст">Найти картинки</span> <kbd id="клавиша"></kbd>
+      </button>
+      <button class="btn" id="стоп" disabled>Стоп</button>
+      <div class="stepper">Картинок на запрос
+        <span class="box"><button aria-label="Меньше картинок" data-lock data-шаг="сколько:-1">−</button><span id="сколько">2</span><button aria-label="Больше картинок" data-lock data-шаг="сколько:1">+</button></span>
+      </div>
+      <div class="stepper">Браузеров
+        <span class="box"><button aria-label="Меньше браузеров" data-lock data-шаг="дорожек:-1">−</button><span id="дорожек">2</span><button aria-label="Больше браузеров" data-lock data-шаг="дорожек:1">+</button></span>
+        <span class="hint" id="совет"></span>
+      </div>
+      <div class="spacer"></div>
+      <button class="btn" id="папка">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>
+        Открыть папку
+      </button>
+    </div>
+  </footer>
+</div>
+
+<dialog id="окно-вставки" aria-labelledby="вставка-заголовок">
+  <form method="dialog" class="sheet">
+    <h2 id="вставка-заголовок">Вставить списком</h2>
+    <p class="muted">Одна строка — один кадр. Сначала номер кадра, потом запросы через |. Кадр с таким же номером заменится, строкам без номера дам следующие свободные номера.</p>
+    <textarea id="вставка-текст" spellcheck="false" placeholder="53 - кот на подоконнике|кот у окна|кошка подоконник солнце&#10;54 - старый трамвай зимой|трамвай снег город"></textarea>
+    <p class="summary" id="вставка-сводка">Вставь список в поле выше.</p>
+    <div class="sheet-actions">
+      <button type="button" class="btn" id="из-буфера">Вставить из буфера</button>
+      <div class="spacer"></div>
+      <button type="submit" class="btn ghost" value="отмена">Отмена</button>
+      <button type="button" class="primary small" id="вставка-готово">Добавить кадры <kbd class="клавиша"></kbd></button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="окно-вопроса" class="narrow" aria-labelledby="вопрос-текст">
+  <form method="dialog" class="sheet narrow">
+    <h2 id="вопрос-текст"></h2>
+    <p class="muted" id="вопрос-пояснение"></p>
+    <div class="sheet-actions">
+      <div class="spacer"></div>
+      <button type="submit" class="btn ghost" value="нет">Отмена</button>
+      <button type="submit" class="primary small danger" value="да" id="вопрос-да"></button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="сообщение" role="status" hidden></div>
+
+<script src="/ui/app.js"></script>
+</body>
+</html>

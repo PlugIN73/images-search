@@ -32,6 +32,7 @@ Write-Host "== PyInstaller"
 & $Py -m PyInstaller --noconfirm --clean --windowed `
   --name $Name `
   --workpath "$Build\work" --specpath $Build --distpath dist `
+  --add-data "$((Resolve-Path ui).Path);ui" `
   okno.py
 if ($LASTEXITCODE) { throw "PyInstaller failed" }
 
