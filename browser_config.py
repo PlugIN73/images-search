@@ -19,6 +19,10 @@ SANDBOX_DISABLE_FLAGS = frozenset({
 })
 
 
+def песочница_отключена(args):
+    return any(arg.split("=", 1)[0] in SANDBOX_DISABLE_FLAGS for arg in args)
+
+
 def chrome_platform():
     if sys.platform == "darwin":
         return "mac-arm64" if platform.machine() == "arm64" else "mac-x64"

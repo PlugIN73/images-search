@@ -64,6 +64,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: В описании релиза есть инструкция использования
+        run: python3 packaging/check_release_notes.py
       - name: Версия в коде совпадает с тегом
         run: |
           code=$(sed -n 's/^ВЕРСИЯ = "\(.*\)"/\1/p' poisk.py)

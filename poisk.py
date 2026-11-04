@@ -23,9 +23,9 @@ from pathlib import Path
 import requests
 from PIL import Image
 
-from browser_config import SANDBOX_DISABLE_FLAGS, найти_браузер, проверить_версию
+from browser_config import найти_браузер, песочница_отключена, проверить_версию
 
-ВЕРСИЯ = "1.0.2"
+ВЕРСИЯ = "1.0.3"
 РЕПОЗИТОРИЙ = "PlugIN73/images-search"
 
 # ---------------- Настройки ----------------
@@ -263,7 +263,7 @@ def найти_ссылки(page, запрос, нужно, ритм=None, жд�
 
 def открыть_браузер(pw, профиль, headless=False, args=()):
     """Запускает обновлённый Chrome с песочницей и прежним постоянным профилем."""
-    if any(arg.split("=", 1)[0] in SANDBOX_DISABLE_FLAGS for arg in args):
+    if песочница_отключена(args):
         raise RuntimeError("Отключать песочницу браузера нельзя.")
     executable = найти_браузер()
     try:
@@ -384,7 +384,7 @@ def самопроверка(с_яндексом=True):
             say(f"Браузер: ок ({ИСПОЛЬЗУЕМЫЙ_БРАУЗЕР[0]}"
                 f"{', ' + ctx.browser.version if ctx.browser else ''})")
             command = ctx.browser.new_browser_cdp_session().send("Browser.getBrowserCommandLine")
-            if any(arg.split("=", 1)[0] in SANDBOX_DISABLE_FLAGS for arg in command["arguments"]):
+            if песочница_отключена(command["arguments"]):
                 raise RuntimeError("Браузер запущен без песочницы.")
             say("Песочница: включена, отключающих параметров нет")
             if с_яндексом:
