@@ -21,8 +21,8 @@ uv venv --python 3.11 --python-preference only-managed "$BUILD/venv"   # все�
 PY="$BUILD/venv/bin/python"
 uv pip install --python "$PY" -r requirements.txt -r packaging/requirements-build.txt
 
-echo "== Chromium для встраивания"
-PLAYWRIGHT_BROWSERS_PATH="$PWD/$BUILD/ms-playwright" "$PY" -m playwright install chromium --no-shell
+echo "== Проверенный Chrome для встраивания"
+"$PY" packaging/download_browser.py "$BUILD/chrome"
 
 echo "== PyInstaller"
 "$PY" -m PyInstaller --noconfirm --clean --windowed \
@@ -40,8 +40,8 @@ echo "== PyInstaller"
 /usr/libexec/PlistBuddy -c "Add :LSEnvironment dict" "$APP/Contents/Info.plist" 2>/dev/null || true
 /usr/libexec/PlistBuddy -c "Add :LSEnvironment:LANG string ru_RU.UTF-8" "$APP/Contents/Info.plist" 2>/dev/null || true
 
-echo "== Встраиваю Chromium"
-ditto "$BUILD/ms-playwright" "$APP/Contents/Resources/ms-playwright"
+echo "== Встраиваю Chrome"
+ditto "$BUILD/chrome" "$APP/Contents/Resources/chrome"
 
 echo "== Подпись (ad-hoc, без аккаунта разработчика)"
 codesign --force --deep --sign - "$APP"

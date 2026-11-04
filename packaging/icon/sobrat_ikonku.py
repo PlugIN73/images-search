@@ -5,7 +5,7 @@
 
 Готовые файлы лежат в репозитории, поэтому сборке этот скрипт не нужен — запускать его,
 только когда поменялся рисунок:  python packaging/icon/sobrat_ikonku.py
-Нужны playwright с Chromium и Pillow (они и так в requirements.txt), для .icns — Mac (iconutil).
+Нужны playwright, обновлённый Chrome и Pillow, для .icns — Mac (iconutil).
 """
 import io
 import shutil
@@ -17,6 +17,9 @@ from pathlib import Path
 from PIL import Image
 from playwright.sync_api import sync_playwright
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from browser_config import найти_браузер
+
 ПАПКА = Path(__file__).resolve().parent
 РИСУНОК = (ПАПКА / "ikonka.svg").read_text(encoding="utf-8")
 ПЛИТКА = "100 100 824 824"          # где на холсте 1024×1024 лежит сама плитка
@@ -26,7 +29,7 @@ def нарисовать(svg, размер=1024):
     """SVG → PNG с прозрачным фоном."""
     svg = svg.replace("<svg ", f'<svg width="{размер}" height="{размер}" ', 1)
     with sync_playwright() as pw:
-        браузер = pw.chromium.launch()
+        браузер = pw.chromium.launch(executable_path=str(найти_браузер()), chromium_sandbox=True)
         страница = браузер.new_page(viewport={"width": размер, "height": размер})
         страница.set_content(f"<html><body style='margin:0;background:transparent'>{svg}</body></html>")
         png = страница.locator("svg").screenshot(omit_background=True)

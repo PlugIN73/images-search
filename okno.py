@@ -287,9 +287,7 @@ def открыть_в_chromium(сервер, действия):
     закрыли (на Mac сам Chromium после закрытия окна продолжает жить), или когда Chromium вышел."""
     chromium = найти_edge() if НА_WINDOWS else None
     if not chromium:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as pw:
-            chromium = pw.chromium.executable_path
+        chromium = str(poisk.найти_браузер())
     for старый in poisk.СЛУЖЕБНАЯ.glob(".окно-chromium*"):      # остались после сбоя прошлого запуска
         shutil.rmtree(старый, ignore_errors=True)
     профиль = tempfile.mkdtemp(prefix=".окно-chromium-", dir=poisk.СЛУЖЕБНАЯ)

@@ -23,7 +23,9 @@ from pathlib import Path
 import requests
 from PIL import Image
 
-ВЕРСИЯ = "1.0.1"
+from browser_config import SANDBOX_DISABLE_FLAGS, найти_браузер, проверить_версию
+
+ВЕРСИЯ = "1.0.2"
 РЕПОЗИТОРИЙ = "PlugIN73/images-search"
 
 # ---------------- Настройки ----------------
@@ -34,15 +36,6 @@ from PIL import Image
 
 СОБРАНО = getattr(sys, "frozen", False)      # запущено как готовое приложение (.app / .exe)
 ПАПКА = Path(sys.executable if СОБРАНО else __file__).resolve().parent
-
-if СОБРАНО:
-    # Свой Chromium лежит внутри пакета: на Mac — в .app/Contents/Resources,
-    # на Windows — в служебной папке _internal рядом с .exe. В систему ничего не ставится.
-    for _встроенный in (ПАПКА.parent / "Resources" / "ms-playwright", ПАПКА / "_internal" / "ms-playwright"):
-        if _встроенный.is_dir():
-            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = str(_встроенный)
-            break
-
 
 def _во_временной_папке(путь):
     """Windows умеет запускать программу прямо из zip-архива — тогда она живёт
@@ -265,38 +258,32 @@ def найти_ссылки(page, запрос, нужно, ритм=None, жд�
     return ссылки
 
 
-def _варианты_браузера():
-    """None — свой Chromium (встроенный в пакет); системные Edge и Chrome — запасные."""
-    if sys.platform.startswith("win"):
-        return [None, "msedge", "chrome"]
-    return [None, "chrome"]
-
-
 ИСПОЛЬЗУЕМЫЙ_БРАУЗЕР = [""]
 
 
 def открыть_браузер(pw, профиль, headless=False, args=()):
-    """Запускает браузер с постоянным профилем, перебирая доступные варианты."""
-    ошибки = []
-    for канал in _варианты_браузера():
-        try:
-            # без окна Playwright ищет отдельный headless-браузер; «chromium» — значит обычный
-            ctx = pw.chromium.launch_persistent_context(
-                профиль, channel=канал or ("chromium" if headless else None), headless=headless, locale="ru-RU",
-                viewport={"width": 1100, "height": 800}, args=list(args))
-            ИСПОЛЬЗУЕМЫЙ_БРАУЗЕР[0] = канал or "встроенный Chromium"
-            if канал and ошибки:
-                say(f"  Внимание: встроенный браузер не запустился, работаю через {канал}.\n"
-                    f"  Если что-то пойдёт не так — скачай программу заново.\n  ({ошибки[0]})")
-            return ctx
-        except Exception as e:
-            текст = str(e)
-            if "ProcessSingleton" in текст or "SingletonLock" in текст or "already in use" in текст:
-                raise RuntimeError("браузер с этим профилем уже открыт — похоже, программа запущена "
-                                   "дважды. Закрой лишнюю копию.") from None
-            ошибки.append(f"{канал or 'chromium'}: {текст.splitlines()[0] if текст else e!r}")
-    raise RuntimeError("не смог запустить браузер. Попробуй скачать программу заново.\n  "
-                       + "\n  ".join(ошибки))
+    """Запускает обновлённый Chrome с песочницей и прежним постоянным профилем."""
+    if any(arg.split("=", 1)[0] in SANDBOX_DISABLE_FLAGS for arg in args):
+        raise RuntimeError("Отключать песочницу браузера нельзя.")
+    executable = найти_браузер()
+    try:
+        ctx = pw.chromium.launch_persistent_context(
+            профиль, executable_path=str(executable), chromium_sandbox=True,
+            headless=headless, locale="ru-RU", viewport={"width": 1100, "height": 800}, args=list(args))
+    except Exception as e:
+        текст = str(e)
+        if "ProcessSingleton" in текст or "SingletonLock" in текст or "already in use" in текст:
+            raise RuntimeError("браузер с этим профилем уже открыт — похоже, программа запущена "
+                               "дважды. Закрой лишнюю копию.") from None
+        raise RuntimeError("Не удалось запустить Chrome с песочницей. Профиль сохранён.\n"
+                           + текст.splitlines()[0]) from e
+    try:
+        проверить_версию(ctx.browser.version if ctx.browser else "")
+    except Exception:
+        ctx.close()
+        raise
+    ИСПОЛЬЗУЕМЫЙ_БРАУЗЕР[0] = "встроенный Chrome" if СОБРАНО else "Chrome for Testing"
+    return ctx
 
 
 # ---------- отметка «скачано из интернета» ----------
@@ -389,14 +376,17 @@ def самопроверка(с_яндексом=True):
     try:
         from playwright.sync_api import sync_playwright
         with sync_playwright() as pw, tempfile.TemporaryDirectory() as профиль:
-            ctx = открыть_браузер(pw, профиль, headless=True)
+            ctx = открыть_браузер(pw, профиль, headless=True, args=["--enable-automation"])
             page = ctx.pages[0] if ctx.pages else ctx.new_page()
             page.set_content("<p id=x>ok</p>")
+            if page.locator("#x").inner_text() != "ok":
+                raise RuntimeError("Страница самопроверки не отобразилась.")
             say(f"Браузер: ок ({ИСПОЛЬЗУЕМЫЙ_БРАУЗЕР[0]}"
                 f"{', ' + ctx.browser.version if ctx.browser else ''})")
-            if СОБРАНО and ИСПОЛЬЗУЕМЫЙ_БРАУЗЕР[0] != "встроенный Chromium":
-                say("Браузер: ОШИБКА — встроенный Chromium не запустился, сработал запасной")
-                хорошо = False
+            command = ctx.browser.new_browser_cdp_session().send("Browser.getBrowserCommandLine")
+            if any(arg.split("=", 1)[0] in SANDBOX_DISABLE_FLAGS for arg in command["arguments"]):
+                raise RuntimeError("Браузер запущен без песочницы.")
+            say("Песочница: включена, отключающих параметров нет")
             if с_яндексом:
                 try:
                     ссылки = найти_ссылки(page, "кот на подоконнике", 4, ждать=False)

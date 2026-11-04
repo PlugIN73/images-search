@@ -1,7 +1,7 @@
 ﻿# Build "Poisk-kartinok" for Windows (folder + zip).
 # Run from the project root in PowerShell:  powershell -ExecutionPolicy Bypass -File packaging\build_windows.ps1
-# Needs Python 3.11 in PATH (or set $env:PYTHON). Chromium is bundled next to the exe
-# (dist\Poisk-kartinok\_internal\ms-playwright), nothing gets installed into the system.
+# Needs Python 3.11 in PATH (or set $env:PYTHON). Chrome is bundled next to the exe
+# (dist\Poisk-kartinok\_internal\chrome), nothing gets installed into the system.
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
 
@@ -22,11 +22,9 @@ $Py = "$Build\venv\Scripts\python.exe"
 & $Py -m pip install -r requirements.txt -r packaging\requirements-build.txt
 if ($LASTEXITCODE) { throw "pip install failed" }
 
-Write-Host "== Chromium to bundle"
-$env:PLAYWRIGHT_BROWSERS_PATH = Join-Path (Resolve-Path $Build) "ms-playwright"
-& $Py -m playwright install chromium --no-shell
-if ($LASTEXITCODE) { throw "playwright install failed" }
-Remove-Item Env:PLAYWRIGHT_BROWSERS_PATH
+Write-Host "== Verified Chrome to bundle"
+& $Py packaging/download_browser.py "$Build\chrome"
+if ($LASTEXITCODE) { throw "Chrome download failed" }
 
 Write-Host "== PyInstaller"
 & $Py -m PyInstaller --noconfirm --clean --windowed `
@@ -37,8 +35,8 @@ Write-Host "== PyInstaller"
   okno.py
 if ($LASTEXITCODE) { throw "PyInstaller failed" }
 
-Write-Host "== Bundling Chromium"
-Copy-Item -Recurse "$Build\ms-playwright" "dist\$Name\_internal\ms-playwright"
+Write-Host "== Bundling Chrome"
+Copy-Item -Recurse "$Build\chrome" "dist\$Name\_internal\chrome"
 
 Write-Host "== Marking files as downloaded from the internet (like Explorer does when extracting a downloaded zip)"
 # The self-test must pass on a bundle that carries Mark-of-the-Web, as on a real user's PC.

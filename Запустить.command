@@ -21,9 +21,13 @@ if [ ! -f "$MARK" ]; then
   mkdir -p "$(dirname "$VENV")"
   [ -x "$VENV/bin/python" ] || uv venv --python 3.11 "$VENV" || exit 1
   uv pip install --python "$VENV/bin/python" -r requirements.txt || exit 1
-  "$VENV/bin/python" -m playwright install chromium || exit 1
   rm -f "$VENV"/.ready*
   touch "$MARK"
+fi
+
+# Используем обновлённый Chrome; старый кэш Playwright не подходит.
+if ! "$VENV/bin/python" -c 'from browser_config import найти_браузер; найти_браузер()'; then
+  "$VENV/bin/python" packaging/download_browser.py || exit 1
 fi
 
 "$VENV/bin/python" okno.py
